@@ -1,134 +1,199 @@
-#+TITLE: :completion ivy
+#+title:    :completion ivy
+#+subtitle: Yesterday's lightest search engine
+#+created:  February 20, 2017
+#+since:    2.0.0
 
-This module adds Ivy, a completion backend.
+* Description :unfold:
+This module provides Ivy integration for a variety of Emacs commands, as well as
+a unified interface for project search and replace, powered by [[https://github.com/BurntSushi/ripgrep/][ripgrep]].
 
 #+begin_quote
 I prefer ivy over ido for its flexibility. I prefer ivy over helm because it's
-lighter.
+lighter, simpler and faster in many cases.
 #+end_quote
 
-+ Project-wide search & replace powered by ~rg~ or ~ag~
-+ Project jump-to navigation ala Command-T, Sublime Text's Jump-to-anywhere or
-  Vim's CtrlP plugin.
-+ Ivy integration for ~M-x~, ~imenu~, ~recentf~ and others.
-+ A powerful, interactive in-buffer search using ~swiper~.
-+ Ivy-powered TODO/FIXME navigation
+** Maintainers
+/This module has no dedicated maintainers./ [[doom-contrib-maintainer:][Become a maintainer?]]
 
-* Table of Contents :TOC:
-- [[#install][Install]]
-  - [[#macos][MacOS]]
-  - [[#arch-linux][Arch Linux]]
-- [[#usage][Usage]]
-  - [[#project-search--replace][Project search & replace]]
-  - [[#jump-to-file-project-navigation][Jump-to-file project navigation]]
-  - [[#in-buffer-searching][In-buffer searching]]
-  - [[#task-lookup][Task lookup]]
-- [[#appendix][Appendix]]
-  - [[#commands][Commands]]
-  - [[#hacks][Hacks]]
+** Module flags
+- +childframe ::
+  Display Ivy windows in a [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Child-Frames.html][child frame]] rather than an popup buffer. *Requires
+  GUI Emacs.*
+- +fuzzy ::
+  Enable fuzzy completion for Ivy searches.
+- +icons ::
+  Enable file icons for switch-{buffer,project}/find-file commands.
+- +prescient ::
+  Enable prescient filtering and sorting for Ivy searches.
 
-* Install
-This module optionally depends on [[https://github.com/BurntSushi/ripgrep][ripgrep]] and [[https://github.com/ggreer/the_silver_searcher][the_silver_searcher]].
-
-~rg~ is faster, but its results aren't deterministic, neither does it support
-multiline search or full PCRE (at the time of writing), that's where ~ag~ is
-useful.
-
-** MacOS
-#+BEGIN_SRC sh :tangle (if (doom-system-os 'macos) "yes")
-brew install ripgrep the_silver_searcher
-#+END_SRC
-
-** Arch Linux
-#+BEGIN_SRC sh :dir /sudo:: :tangle (if (doom-system-os 'arch) "yes")
-sudo pacman --needed --noconfirm -S ripgrep the_silver_searcher
-#+END_SRC
-
-* Usage
-Here is some insight into how I use this module.
-
-** Project search & replace
-There are four Ex interfaces for the silver searcher and ripgrep. They are:
-
-+ ~:ag[!]~
-+ ~:agcwd[!]~
-+ ~:rg[!]~
-+ ~:rgcwd[!]~
-
-The optional BANG tells ag/rg to include ignored files in the search. And the
-\*cwd variant of each command will only search in the current directory
-(non-recursively).
-
-[[/../screenshots/modules/completion/ivy/ivy-search.gif]]
-
-Now, how do we do text replacements? With the ivy popup open you can press
-=S+Tab= to create an wgrep buffer out of the results.
-
-[[/../screenshots/modules/completion/ivy/ivy-search-replace.gif]]
-
-Make your modifications and press =C-c C-c= to commit them, or =C-c C-k= to
-abort.
-
-** Jump-to-file project navigation
-Inspired by Sublime Text's jump-to-anywhere, Vim's CtrlP/Unite plugins, and
-Textmate's Command-T, a marriage of ~projectile~ and ~ivy~ makes this available
-in Emacs.
-
-Invoke it with =SPC f /=, =SPC SPC= or ~M-x counsel-projectile-find-file~.
-
-[[/../screenshots/modules/completion/ivy/ivy-projectile.gif]]
-
-** In-buffer searching
-I use ~evil-search~ (invoked by pressing =/= in normal mode) when jumping
-small/moderate (or predictable) distances. However, there are occasions where I
-need more feedback, so I turn to ~swiper~ (available directly with =M-x swiper
-RET=, or via ~:sw[iper]~).
-
-[[/../screenshots/modules/completion/ivy/ivy-swiper.gif]]
-
-** Task lookup
-I sprinkle my projects with TODO's & FIXME's. You can navigate to and peruse
-them via ~M-x +ivy/tasks~ or ~:todo[!]~ (ex command).
-
-[[/../screenshots/modules/completion/ivy/ivy-todo.gif]]
-
-* Appendix
-** Commands
-Here is a list of my commonly used commands, their default keybinds (defined in
-[[../../private/default/+bindings.el][private/default/+bindings.el]]), and their corresponding ex command (defined in
-[[../../private/default/+evil-commands.el][private/default/+evil-commands.el]]).
-
-| command                             | key / ex command       | description                                                      |
-|-------------------------------------+------------------------+------------------------------------------------------------------|
-| ~counsel-M-x~                       | =M-x=                  | Smarter, smex-powered M-x                                        |
-| ~counsel-bookmark~                  | =SPC RET=              | Find bookmark                                                    |
-| ~counsel-find-file~                 | =SPC f .= or =SPC .=   | Browse from current directory                                    |
-| ~counsel-projectile-find-file~      | =SPC f /= or =SPC SPC= | Find file in project                                             |
-| ~counsel-projectile-switch-project~ | =SPC p p=              | Open another project                                             |
-| ~counsel-recentf~                   | =SPC f r=              | Find recently opened file                                        |
-| ~ivy-switch-buffer~                 | =SPC b b=              | Jump to buffer in current workspace                              |
-| ~+ivy/switch-workspace-buffer~      | =SPC b B=              | Jump to buffer across workspaces                                 |
-| ~+ivy:ag~                           | ~:ag[!] [QUERY]~       | Search project (BANG = ignore gitignore)                         |
-| ~+ivy:ag-cwd~                       | ~:agcwd[!] [QUERY]~    | Search this directory (BANG = don't recurse into subdirectories) |
-| ~+ivy:rg~                           | ~:rg[!] [QUERY]~       | Search project (if BANG, ignore gitignore)                       |
-| ~+ivy:rg-cwd~                       | ~:rgcwd[!] [QUERY]~    | Search this directory (BANG = don't recurse into subdirectories) |
-| ~+ivy:swiper~                       | ~:sw[iper] [QUERY]~    | Search current buffer                                            |
-| ~+ivy:todo~                         | ~:todo[!]~             | List all TODO/FIXMEs in project (or current file if BANG)        |
-
-While in a search (e.g. invoked from ~+ivy:ag~ or ~+ivy:rg~), these new
-keybindings are available to you:
-
-| key         | description                                                                    |
-|-------------+--------------------------------------------------------------------------------|
-| =<backtab>= | Perform search/replace on the search results (open occur buffer in wgrep mode) |
-| =C-SPC=     | Preview the current candidate                                                  |
-| =M-RET=     | Open the selected candidate in other-window                                    |
+** Packages
+- [[doom-package:nerd-icons-ivy]]* if [[doom-module:+icons]]
+- [[doom-package:amx]]
+- [[doom-package:counsel]]
+- [[doom-package:counsel-projectile]]
+- [[doom-package:flx]]* if [[doom-module:+fuzzy]]
+- [[doom-package:ivy]]
+- [[doom-package:ivy-hydra]]
+- [[doom-package:ivy-posframe]]* if [[doom-module:+childframe]]
+- [[doom-package:ivy-rich]]
+- [[doom-package:prescient]]* if [[doom-module:+prescient]]
+- [[doom-package:swiper]]
+- [[doom-package:wgrep]]
 
 ** Hacks
-+ Functions with ivy/counsel equivalents have been globally remapped (like
+- Functions with ivy/counsel equivalents have been globally remapped (like
   ~find-file~ => ~counsel-find-file~). So a keybinding to ~find-file~ will
   invoke ~counsel-find-file~ instead.
-+ ~counsel-[arp]g~'s 3-character limit was reduced to 1 (mainly for the ex
+- ~counsel-[arp]g~'s 3-character limit was reduced to 1 (mainly for the ex
   command)
 
+** TODO Changelog
+# This section will be machine generated. Don't edit it by hand.
+/This module does not have a changelog yet./
 
+* Installation
+[[id:01cffea4-3329-45e2-a892-95a384ab2338][Enable this module in your ~doom!~ block.]]
+
+This module has only one requirement: [[https://github.com/BurntSushi/ripgrep][Ripgrep]], which is a hard dependency of
+Doom itself, so you should already have it installed.
+
+Otherwise, Counsel (an Ivy plugin) provides many commands to interface with a
+variety of programs from [[https://github.com/junegunn/fzf][fzf]] to [[https://kapeli.com/dash][Dash docsets]] to [[https://www.passwordstore.org/][pass]] and /much/ more. These
+programs are optional for this module, but must be installed if you intend to
+use their associated Helm command or plugin.
+
+* TODO Usage
+#+begin_quote
+ 󱌣 /This module's usage documentation is incomplete./ [[doom-contrib-module:][Complete it?]]
+#+end_quote
+
+[[doom-package:ivy]] is a /large/ framework for completing things. Covering all its features is
+not within the scope of this module's documentation, so only its highlights will
+be covered here.
+
+** Jump-to navigation
+Inspired by Sublime Text's jump-to-anywhere, CtrlP/Unite in Vim, and Textmate's
+Command-T, this module provides similar functionality by bringing [[doom-package:projectile]] and
+[[doom-package:ivy]] together.
+
+https://assets.doomemacs.org/completion/ivy/projectile.png
+
+| Keybind          | Description                         |
+|------------------+-------------------------------------|
+| [[kbd:][SPC p f]], [[kbd:][SPC SPC]] | Jump to file in project             |
+| [[kbd:][SPC f f]], [[kbd:][SPC .]]   | Jump to file from current directory |
+| [[kbd:][SPC s i]]          | Jump to symbol in file              |
+
+** Project search & replace
+This module provides interactive text search and replace using ripgrep.
+
+| Keybind | Description              |
+|---------+--------------------------|
+| [[kbd:][SPC s p]] | Search project           |
+| [[kbd:][SPC s P]] | Search another project   |
+| [[kbd:][SPC s d]] | Search this directory    |
+| [[kbd:][SPC s D]] | Search another directory |
+
+https://assets.doomemacs.org/completion/ivy/search.png
+
+Prefixing these keys with the universal argument (=SPC u= for evil users; =C-u=
+otherwise) changes the behavior of these commands, instructing the underlying
+search engine to include ignored files.
+
+This module also provides Ex Commands for evil users:
+| Ex command             | Description                                                      |
+|------------------------+------------------------------------------------------------------|
+| ~:pg[rep][!] [QUERY]~  | Search project (if ~!~, include hidden files)                    |
+| ~:pg[rep]d[!] [QUERY]~ | Search from current directory (if ~!~, don't search recursively) |
+
+The optional `!` is equivalent to the universal argument for the previous
+commands.
+
+-----
+
+These keybindings are available while a search is active:
+| Keybind | Description                                   |
+|---------+-----------------------------------------------|
+| [[kbd:][C-c C-o]] | Open a buffer with your search results        |
+| [[kbd:][C-c C-e]] | Open a writable buffer of your search results |
+| [[kbd:][C-SPC]]   | Preview the current candidate                 |
+| [[kbd:][C-RET]]   | Open the selected candidate in other-window   |
+
+Changes to the resulting wgrep buffer (opened by [[kbd:][C-c C-e]]) can be committed with
+[[kbd:][C-c C-c]] and aborted with [[kbd:][C-c C-k]] (alternatively [[kbd:][ZZ]] and [[kbd:][ZQ]], for evil users).
+
+https://assets.doomemacs.org/completion/ivy/search-replace.png
+
+** In-buffer searching
+The [[doom-package:swiper]] package provides an interactive buffer search powered by ivy. It
+can be invoked with:
+
+- [[kbd:][SPC s s]] (~swiper-isearch~)
+- [[kbd:][SPC s S]] (~swiper-isearch-thing-at-point~)
+- [[kbd:][SPC s b]] (~swiper~)
+- ~:sw[iper] [QUERY]~
+
+https://assets.doomemacs.org/completion/ivy/swiper.png
+
+A wgrep buffer can be opened from swiper with [[kbd:][C-c C-e]].
+
+** Ivy integration for various completing commands
+*** General
+| Keybind    | Description               |
+|------------+---------------------------|
+| [[kbd:][M-x]], [[kbd:][SPC :]] | Smarter, smex-powered M-x |
+| [[kbd:][SPC ']]      | Resume last ivy session   |
+
+*** Jump to files, buffers or projects
+| Keybind          | Description                           |
+|------------------+---------------------------------------|
+| [[kbd:][SPC RET]]          | Find bookmark                         |
+| [[kbd:][SPC f f]], [[kbd:][SPC .]]   | Browse from current directory         |
+| [[kbd:][SPC p f]], [[kbd:][SPC SPC]] | Find file in project                  |
+| [[kbd:][SPC f r]]          | Find recently opened file             |
+| [[kbd:][SPC p p]]          | Open another project                  |
+| [[kbd:][SPC b b]], [[kbd:][SPC ,]]   | Switch to buffer in current workspace |
+| [[kbd:][SPC b B]], [[kbd:][SPC <]]   | Switch to buffer                      |
+
+*** Search
+| Keybind | Description                               |
+|---------+-------------------------------------------|
+| [[kbd:][SPC p t]] | List all TODO/FIXMEs in project           |
+| [[kbd:][SPC s b]] | Search the current buffer                 |
+| [[kbd:][SPC s d]] | Search this directory                     |
+| [[kbd:][SPC s D]] | Search another directory                  |
+| [[kbd:][SPC s i]] | Search for symbol in current buffer       |
+| [[kbd:][SPC s p]] | Search project                            |
+| [[kbd:][SPC s P]] | Search another project                    |
+| [[kbd:][SPC s s]] | Search the current buffer (incrementally) |
+
+* TODO Configuration
+#+begin_quote
+ 󱌣 /This module's configuration documentation is incomplete./ [[doom-contrib-module:][Complete it?]]
+#+end_quote
+
+** TODO Enable fuzzy/non-fuzzy search for specific commands
+** TODO Change the position of the ivy childframe
+
+* TODO Troubleshooting
+** Sorting is not applied at all sometimes
+If the number of candidates is greater than ~ivy-sort-max-size~, sorting will be
+disabled completely. Doom lowers the default value to prevent performance
+issues, so increasing the value may fix your issue:
+#+begin_src elisp
+;;; add to $DOOMDIR/config.el
+(after! ivy
+  (setq ivy-sort-max-size 30000))  ; Doom sets this to 7500, but Ivy's default is 30k
+#+end_src
+
+
+* Frequently asked questions
+[[doom-suggest-faq:][Ask a question?]]
+
+** Helm vs Ivy vs Ido vs Vertico
+See [[id:4f36ae11-1da8-4624-9c30-46b764e849fc][this answer]].
+
+* TODO Appendix
+#+begin_quote
+ 󱌣 This module has no appendix yet. [[doom-contrib-module:][Write one?]]
+#+end_quote

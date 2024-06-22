@@ -1,19 +1,46 @@
 ;;; lang/rest/config.el -*- lexical-binding: t; -*-
 
-(def-package! restclient
-  :commands restclient-mode
-  :mode ("\\.http$" . restclient-mode)
+(use-package! restclient
+  :mode ("\\.http\\'" . restclient-mode)
+  ;; line numbers aren't enabled by default in fundamental-mode-derived modes
+  :hook (restclient-mode . display-line-numbers-mode)
   :config
-  (set! :popup "*HTTP Response*" :size 30 :select t :noesc t :autokill t)
-  (map! :mode restclient-mode
-        :n [M-return] 'restclient-http-send-current
+  (set-popup-rule! "^\\*HTTP Response" :size 0.4 :quit 'other)
+
+  (setq-hook! 'restclient-mode-hook
+    imenu-generic-expression '((nil "^[A-Z]+\s+.+" 0)))
+
+  (defadvice! +rest--permit-self-signed-ssl-a (fn &rest args)
+    "Forces underlying SSL verification to prompt for self-signed or invalid
+certs, rather than reject them silently."
+    :around #'restclient-http-do
+    (require 'gnutls)
+    (let (gnutls-verify-error)
+      (apply fn args)))
+
+  (map! :map restclient-mode-map
+        :n [return] #'+rest/dwim-at-point
+        :n "za" #'restclient-toggle-body-visibility
+        :n "zm" #'+rest/fold-all
+        :n "zr" #'outline-show-all
+
         :localleader
-        :desc "Execute HTTP request"     :n "e" 'restclient-http-send-current
-        :desc "Execute raw HTTP request" :n "E" 'restclient-http-send-current-raw
-        :desc "Copy curl command"        :n "c" 'restclient-copy-curl-command))
+        "e" #'restclient-http-send-current
+        "E" #'restclient-http-send-current-raw
+        "c" #'restclient-copy-curl-command))
 
 
-(def-package! company-restclient
-  :when (featurep! :completion company)
+(use-package! company-restclient
+  :when (modulep! :completion company)
   :after restclient
-  :config (set! :company-backend 'restclient-mode '(company-restclient)))
+  :config (set-company-backend! 'restclient-mode 'company-restclient))
+
+
+(use-package! restclient-jq
+  :when (modulep! +jq)
+  :after restclient)
+
+
+(use-package! jq-mode
+  :when (modulep! +jq)
+  :after restclient-jq)

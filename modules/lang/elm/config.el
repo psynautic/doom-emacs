@@ -1,14 +1,33 @@
 ;;; lang/elm/config.el -*- lexical-binding: t; -*-
 
-(def-package! elm-mode
-  :mode "\\.elm$"
-  :config
-  (add-hook! 'elm-mode-hook #'(flycheck-mode rainbow-delimiters-mode))
-  (set! :company-backend 'elm-mode '(company-elm))
-  (setq elm-format-on-save t))
+(after! elm-mode
+  (if (modulep! +lsp)
+      (add-hook 'elm-mode-local-vars-hook #'lsp! 'append)
+    (set-company-backend! 'elm-mode 'company-elm))
 
+  (when (modulep! +tree-sitter)
+    (add-hook 'elm-mode-local-vars-hook #'tree-sitter! 'append))
+ 
+  (set-repl-handler! 'elm-mode #'run-elm-interactive)
+  (set-ligatures! 'elm-mode
+    :null "null"
+    :true "true" :false "false"
+    :int "Int" :str "String"
+    :float "Float"
+    :bool "Bool"
+    :not "not"
+    :and "&&" :or "||")
 
-(def-package! flycheck-elm
-  :after (:all flycheck elm-mode)
-  :hook (flycheck-mode . flycheck-elm-setup))
+  (map! :map elm-mode-map
+        :localleader
+        (:prefix ("m" . "elm make")
+         :desc "Compile HTML" "m" #'+elm/compile-html
+         :desc "Compile HTML (optimized)" "M" #'+elm/compile-html-optimized
+         :desc "Compile JS" "j" #'+elm/compile-js
+         :desc "Compile JS (optimized)" "J" #'+elm/compile-js-optimized)))
 
+(use-package! flycheck-elm
+  :when (and (modulep! :checkers syntax)
+             (not (modulep! :checkers syntax +flymake)))
+  :after elm-mode
+  :config (add-to-list 'flycheck-checkers 'elm))

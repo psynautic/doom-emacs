@@ -1,40 +1,58 @@
 ;;; lang/haskell/config.el -*- lexical-binding: t; -*-
 
-(cond ((featurep! +intero) (load! +intero))
-      ((featurep! +dante)  (load! +dante)))
+(after! projectile
+  (add-to-list 'projectile-project-root-files "stack.yaml"))
 
 
 ;;
-;; Common plugins
-;;
+;;; Common packages
 
-(def-package! haskell-mode
-  :mode "\\.hs$"
-  :mode ("\\.ghci$" . ghci-script-mode)
-  :mode ("\\.cabal$" . haskell-cabal-mode)
-  :interpreter (("runghc" . haskell-mode)
-                ("runhaskell" . haskell-mode))
-  :config
-  (load "haskell-mode-autoloads" nil t)
+(after! haskell-mode
+  (setq haskell-process-suggest-remove-import-lines t  ; warnings for redundant imports etc
+        haskell-process-auto-import-loaded-modules t
+        haskell-process-show-overlays (not (modulep! :checkers syntax))) ; redundant with flycheck
 
-  (set! :repl 'haskell-mode #'switch-to-haskell)
-  (push ".hi" completion-ignored-extensions)
+  (set-lookup-handlers! 'haskell-mode
+    :definition #'haskell-mode-jump-to-def-or-tag)
+  (set-file-template! 'haskell-mode
+    :trigger #'haskell-auto-insert-module-template
+    :project t)
+  (set-repl-handler!
+    '(haskell-mode haskell-cabal-mode literate-haskell-mode)
+    #'+haskell/open-repl :persist t)
+  ;; Don't kill REPL popup on ESC/C-g
+  (set-popup-rule! "^\\*haskell\\*" :quit nil)
 
-  (autoload 'switch-to-haskell "inf-haskell" nil t)
-  (after! inf-haskell
-    (map! :map inferior-haskell-mode-map "ESC ESC" #'doom/popup-close)))
+  (add-hook! 'haskell-mode-hook
+             #'haskell-collapse-mode ; support folding haskell code blocks
+             #'interactive-haskell-mode)
+
+  (when (modulep! +tree-sitter)
+    (add-hook 'haskell-mode-local-vars-hook #'tree-sitter! 'append))
+
+  (add-to-list 'completion-ignored-extensions ".hi")
+
+  (map! :map haskell-mode-map
+        :n "o" #'+haskell/evil-open-below
+        :n "O" #'+haskell/evil-open-above
+        (:when (modulep! :tools lookup)
+         [remap haskell-mode-jump-to-def-or-tag] #'+lookup/definition))
+
+  (map! :localleader
+        :map haskell-mode-map
+        "b" #'haskell-process-cabal-build
+        "c" #'haskell-cabal-visit-file
+        "h" #'haskell-hide-toggle
+        "H" #'haskell-hide-toggle-all))
 
 
-(def-package! company-ghc
-  :when (featurep! :completion company)
-  :after haskell-mode
+(use-package! lsp-haskell
+  :when (modulep! +lsp)
+  :defer t
   :init
-  (add-hook 'haskell-mode-hook #'ghc-comp-init)
+  (add-hook 'haskell-mode-local-vars-hook #'lsp! 'append)
+  (add-hook 'haskell-literate-mode-local-vars-hook #'lsp! 'append)
+  (after! lsp-mode (require 'lsp-haskell))
   :config
-  (if (executable-find "ghc-mod")
-      (set! :company-backend 'haskell-mode #'company-ghc)
-    (warn "haskell-mode: couldn't find ghc-mode")
-    (remove-hook 'haskell-mode-hook #'ghc-comp-init))
-
-  (setq company-ghc-show-info 'oneline))
-
+  ;; Does some strange indentation if it pastes in the snippet
+  (setq-hook! 'haskell-mode-hook yas-indent-line 'fixed))

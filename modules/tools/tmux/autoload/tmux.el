@@ -13,7 +13,6 @@
 
 ;;
 ;; Commands
-;;
 
 ;;;###autoload
 (defun +tmux (command &rest args)
@@ -29,7 +28,7 @@
       (unwind-protect
           (if (= 0 (setq code (quiet! (shell-command cmdstr output errors))))
               (with-current-buffer output
-                (setq +tmux-last-command `(,cmdstr ,@args))
+                (setq +tmux-last-command `(,(substring cmdstr (+ 1 (length bin))) ,@args))
                 (buffer-string))
             (error "[%d] tmux $ %s (%s)"
                    code
@@ -53,29 +52,34 @@ but do not execute them."
 ;;;###autoload
 (defun +tmux/send-region (beg end &optional noreturn)
   "Send region to tmux."
-  (interactive "rP")
+  (interactive (list (region-beginning)
+                     (region-end)
+                     current-prefix-arg))
   (+tmux/run (string-trim (buffer-substring-no-properties beg end))
              noreturn))
 
 ;;;###autoload
 (defun +tmux/rerun ()
   "Rerun the last command executed by `+tmux' and `+tmux/run'."
-  (interactive "P")
+  (interactive)
   (unless +tmux-last-command
     (user-error "No last command to run"))
-  (apply #'+tmux (car +tmux-last-command) (cdr +tmux-last-command)))
+  (apply #'+tmux +tmux-last-command))
 
 ;;;###autoload
-(defun +tmux/cd (&optional directory)
-  "Change the pwd of the currently active tmux pane to DIRECTORY (defaults to
-`default-directory', or to `doom-project-root' with the universal argument)."
-  (interactive
-   (list
-    (when current-prefix-arg
-      (read-directory-name
-       "cd: " nil
-       (if current-prefix-arg (doom-project-root) default-directory) t))))
-  (+tmux "cd %s" (or directory default-directory)))
+(defun +tmux/cd (&optional directory noreturn)
+  "Change the pwd of the currently active tmux pane to DIRECTORY.
+
+DIRECTORY defaults to `default-directory' if omitted, or to `doom-project-root'
+if prefix arg is non-nil.
+
+If NORETURN is non-nil, send the cd command to tmux, but do not execute the
+command."
+  (interactive "D")
+  (+tmux/run (format "cd %S" (or directory (if current-prefix-arg
+                                               (doom-project-root)
+                                             default-directory)))
+             noreturn))
 
 ;;;###autoload
 (defun +tmux/cd-to-here ()
@@ -92,7 +96,6 @@ but do not execute them."
 
 ;;
 ;; Data functions
-;;
 
 ;;;###autoload
 (defun +tmux-list-sessions ()
@@ -111,10 +114,10 @@ but do not execute them."
   (if-let* ((lines
              (+tmux (format "list-windows %s -F '#{window_id};#{session_id};#{window_active};#{window_name};#{window_activity_flag}'"
                             (if session
-                                (concat "-t " (car session))
+                                (concat "-t " (shell-quote-argument (car session)))
                               "-a")))))
-      (cl-loop for line in (string-split lines "\n" t)
-               collect (let ((window (string-split line ";")))
+      (cl-loop for line in (split-string lines "\n" t)
+               collect (let ((window (split-string line ";")))
                          (list (nth 0 window)
                                :session-id (nth 1 window)
                                :name (nth 3 window)
@@ -129,9 +132,9 @@ but do not execute them."
                             (if sess-or-win
                                 (concat (if (string-prefix-p "$" (car sess-or-win)) "-s ")
                                         "-t "
-                                        (car sess-or-win))
+                                        (shell-quote-argument (car sess-or-win)))
                               "-a")))))
-      (cl-loop for line in (string-split lines "\n" t)
+      (cl-loop for line in (split-string lines "\n" t)
                collect (let ((pane (split-string line ";")))
                          (list (nth 0 pane)
                                :window-id (nth 1 pane)

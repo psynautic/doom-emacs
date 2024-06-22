@@ -1,241 +1,330 @@
 ;;; lang/cc/config.el --- c, c++, and obj-c -*- lexical-binding: t; -*-
 
-(defvar +cc-default-include-paths (list "include/")
-  "A list of default paths, relative to a project root, to search for headers in
-C/C++. Paths can be absolute. This is ignored if your project has a JSON
-compilation database.")
+(defvar +cc-default-include-paths
+  (list "include"
+        "includes")
+  "A list of default relative paths which will be searched for up from the
+current file, to be passed to irony as extra header search paths. Paths can be
+absolute. This is ignored if your project has a compilation database.
+
+This is ignored by ccls.")
+
+(defvar +cc-default-header-file-mode 'c-mode
+  "Fallback major mode for .h files if all other heuristics fail (in
+`+cc-c-c++-objc-mode').")
 
 (defvar +cc-default-compiler-options
   `((c-mode . nil)
     (c++-mode
-     . ,(list "-std=c++11" ; use C++11 by default
-              (when IS-MAC
+     . ,(list "-std=c++1z" ; use C++17 draft by default
+              (when (featurep :system 'macos)
                 ;; NOTE beware: you'll get abi-inconsistencies when passing
                 ;; std-objects to libraries linked with libstdc++ (e.g. if you
                 ;; use boost which wasn't compiled with libc++)
-                (list "-stdlib=libc++"))))
+                "-stdlib=libc++")))
     (objc-mode . nil))
   "A list of default compiler options for the C family. These are ignored if a
-compilation database is present in the project.")
+compilation database is present in the project.
+
+This is ignored by ccls.")
 
 
 ;;
-;; Plugins
-;;
+;;; Packages
 
-(def-package! cc-mode
-  :commands (c-mode c++-mode objc-mode java-mode)
-  :mode ("\\.mm" . objc-mode)
-  :preface
-  (defun +cc-c++-header-file-p ()
-    (and buffer-file-name
-         (equal (file-name-extension buffer-file-name) "h")
-         (or (file-exists-p (expand-file-name
-                             (concat (file-name-sans-extension buffer-file-name)
-                                     ".cpp")))
-             (when-let* ((file (car-safe (projectile-get-other-files
-                                          buffer-file-name
-                                          (projectile-current-project-files)))))
-               (equal (file-name-extension file) "cpp")))))
-
-  (defun +cc-objc-header-file-p ()
-    (and buffer-file-name
-         (equal (file-name-extension buffer-file-name) "h")
-         (re-search-forward "@\\<interface\\>" magic-mode-regexp-match-limit t)))
-
-  (push (cons #'+cc-c++-header-file-p  'c++-mode)  magic-mode-alist)
-  (push (cons #'+cc-objc-header-file-p 'objc-mode) magic-mode-alist)
-
-  :init
-  (setq-default c-basic-offset tab-width)
-
+(use-package! cc-mode
+  :mode ("\\.mm\\'" . objc-mode)
+  ;; Use `c-mode'/`c++-mode'/`objc-mode' depending on heuristics
+  :mode ("\\.h\\'" . +cc-c-c++-objc-mode)
+  ;; Ensure find-file-at-point recognize system libraries in C modes. It must be
+  ;; set up before the likes of irony/lsp are initialized. Also, we use
+  ;; local-vars hooks to ensure these only run in their respective major modes,
+  ;; and not their derived modes.
+  :hook ((c-mode-local-vars c++-mode-local-vars objc-mode-local-vars) . +cc-init-ffap-integration-h)
+  ;;; Improve fontification in C/C++ (also see `modern-cpp-font-lock')
+  :hook (c-mode-common . rainbow-delimiters-mode)
+  :hook ((c-mode c++-mode) . +cc-fontify-constants-h)
   :config
-  (set! :electric '(c-mode c++-mode objc-mode java-mode)
-        :chars '(?\n ?\}))
-  (set! :company-backend
-        '(c-mode c++-mode objc-mode)
-        '(company-irony-c-headers company-irony))
+  (set-docsets! 'c-mode "C")
+  (set-docsets! 'c++-mode "C++" "Boost")
+  (set-electric! '(c-mode c++-mode objc-mode java-mode) :chars '(?\n ?\} ?\{))
+  (set-formatter!
+    'clang-format
+    '("clang-format"
+      "-assume-filename"
+      (or (buffer-file-name)
+          (cdr (assoc major-mode
+                      '((c-mode        . ".c")
+                        (c++-mode      . ".cpp")
+                        (cuda-mode     . ".cu")
+                        (protobuf-mode . ".proto"))))))
+    :modes '(c-mode c++-mode protobuf-mode cuda-mode))
+  (set-rotate-patterns! 'c++-mode
+    :symbols '(("public" "protected" "private")
+               ("class" "struct")))
+  (set-ligatures! '(c-mode c++-mode)
+    ;; Functional
+    ;; :def "void "
+    ;; Types
+    :null "nullptr"
+    :true "true" :false "false"
+    :int "int" :float "float"
+    :str "std::string"
+    :bool "bool"
+    ;; Flow
+    :not "!"
+    :and "&&" :or "||"
+    :for "for"
+    :return "return"
+    :yield "#require")
 
-  ;;; Style/formatting
-  ;; C/C++ style settings
-  (c-toggle-electric-state -1)
-  (c-toggle-auto-newline -1)
-  (c-set-offset 'substatement-open '0) ; don't indent brackets
-  (c-set-offset 'inline-open       '+)
-  (c-set-offset 'block-open        '+)
-  (c-set-offset 'brace-list-open   '+)
-  (c-set-offset 'case-label        '+)
-  (c-set-offset 'access-label      '-)
-  (c-set-offset 'arglist-intro     '+)
-  (c-set-offset 'arglist-close     '0)
-  ;; Indent privacy keywords at same level as class properties
-  ;; (c-set-offset 'inclass #'+cc-c-lineup-inclass)
+  (add-to-list 'find-sibling-rules '("/\\([^/]+\\)\\.c\\(c\\|pp\\)?\\'" "\\1.h\\(h\\|pp\\)?\\'"))
+  (add-to-list 'find-sibling-rules '("/\\([^/]+\\)\\.h\\(h\\|pp\\)?\\'" "\\1.c\\(c\\|pp\\)?\\'"))
 
-  ;;; Better fontification (also see `modern-cpp-font-lock')
-  (add-hook 'c-mode-common-hook #'rainbow-delimiters-mode)
-  (add-hook! (c-mode c++-mode) #'highlight-numbers-mode)
-  (add-hook! (c-mode c++-mode) #'+cc|fontify-constants)
+  (when (modulep! +tree-sitter)
+    (add-hook! '(c-mode-local-vars-hook
+                 c++-mode-local-vars-hook)
+               :append #'tree-sitter!))
 
-  ;; Improve indentation of inline lambdas in C++11
-  (advice-add #'c-lineup-arglist :around #'+cc*align-lambda-arglist)
+  ;; HACK Suppress 'Args out of range' error in when multiple modifications are
+  ;;      performed at once in a `c++-mode' buffer, e.g. with `iedit' or
+  ;;      multiple cursors.
+  (undefadvice! +cc--suppress-silly-errors-a (fn &rest args)
+    :around #'c-after-change-mark-abnormal-strings
+    (ignore-errors (apply fn args)))
 
-  ;;; Keybindings
-  ;; Completely disable electric keys because it interferes with smartparens and
-  ;; custom bindings. We'll do this ourselves.
-  (setq c-tab-always-indent nil
-        c-electric-flag nil)
-  (dolist (key '("#" "{" "}" "/" "*" ";" "," ":" "(" ")"))
-    (define-key c-mode-base-map key nil))
-  ;; Smartparens and cc-mode both try to autoclose angle-brackets intelligently.
-  ;; The result isn't very intelligent (causes redundant characters), so just do
-  ;; it ourselves.
-  (map! :map c++-mode-map
-        "<" nil
-        :i ">" #'+cc/autoclose->-maybe)
+  ;; Custom style, based off of linux
+  (setq c-basic-offset tab-width
+        c-backspace-function #'delete-backward-char)
 
-  ;; ...and leave it to smartparens
-  (sp-with-modes '(c-mode c++-mode objc-mode java-mode)
-    (sp-local-pair "<" ">" :when '(+cc-sp-point-is-template-p +cc-sp-point-after-include-p))
-    (sp-local-pair "/*" "*/" :post-handlers '(("||\n[i]" "RET") ("| " "SPC")))
-    ;; Doxygen blocks
-    (sp-local-pair "/**" "*/" :post-handlers '(("||\n[i]" "RET") ("||\n[i]" "SPC")))
-    (sp-local-pair "/*!" "*/" :post-handlers '(("||\n[i]" "RET") ("[d-1]< | " "SPC")))))
+  (c-add-style
+   "doom" '((c-comment-only-line-offset . 0)
+            (c-hanging-braces-alist (brace-list-open)
+                                    (brace-entry-open)
+                                    (substatement-open after)
+                                    (block-close . c-snug-do-while)
+                                    (arglist-cont-nonempty))
+            (c-cleanup-list brace-else-brace)
+            (c-offsets-alist
+             (knr-argdecl-intro . 0)
+             (substatement-open . 0)
+             (substatement-label . 0)
+             (statement-cont . +)
+             (case-label . +)
+             ;; align args with open brace OR don't indent at all (if open
+             ;; brace is at eolp and close brace is after arg with no trailing
+             ;; comma)
+             (brace-list-intro . 0)
+             (brace-list-close . -)
+             (arglist-intro . +)
+             (arglist-close +cc-lineup-arglist-close 0)
+             ;; don't over-indent lambda blocks
+             (inline-open . 0)
+             (inlambda . 0)
+             ;; indent access keywords +1 level, and properties beneath them
+             ;; another level
+             (access-label . -)
+             (inclass +cc-c++-lineup-inclass +)
+             (label . 0))))
+
+  (when (listp c-default-style)
+    (setf (alist-get 'other c-default-style) "doom"))
+
+  (after! ffap
+    (add-to-list 'ffap-alist '(c-mode . ffap-c-mode))))
 
 
-(def-package! modern-cpp-font-lock
+(use-package! modern-cpp-font-lock
   :hook (c++-mode . modern-c++-font-lock-mode))
 
 
-(def-package! irony
-  :after cc-mode
+(use-package! irony
+  :unless (modulep! +lsp)
   :commands irony-install-server
-  :preface (setq irony-server-install-prefix (concat doom-etc-dir "irony-server/"))
-  :init
-  (defun +cc|init-irony-mode ()
-    (when (memq major-mode '(c-mode c++-mode objc-mode))
-      (irony-mode +1)))
-  (add-hook! (c-mode c++-mode objc-mode) #'+cc|init-irony-mode)
-  :config
-  (unless (file-directory-p irony-server-install-prefix)
-    (warn "irony-mode: server isn't installed; run M-x irony-install-server"))
   ;; Initialize compilation database, if present. Otherwise, fall back on
   ;; `+cc-default-compiler-options'.
-  (add-hook 'irony-mode-hook #'+cc|irony-init-compile-options))
-
-(def-package! irony-eldoc
-  :after irony
-  :hook (irony-mode . irony-eldoc))
-
-(def-package! flycheck-irony
-  :when (featurep! :feature syntax-checker)
-  :after irony
+  :hook (irony-mode . +cc-init-irony-compile-options-h)
+  ;; Only initialize `irony-mode' if the server is available. Otherwise fail
+  ;; quietly and gracefully.
+  :hook ((c-mode-local-vars c++-mode-local-vars objc-mode-local-vars) . +cc-init-irony-mode-maybe-h)
+  :preface (setq irony-server-install-prefix (concat doom-data-dir "irony-server/"))
   :config
-  (add-hook 'irony-mode-hook #'flycheck-mode)
-  (flycheck-irony-setup))
+  (defun +cc-init-irony-mode-maybe-h ()
+    (if (file-directory-p irony-server-install-prefix)
+        (irony-mode +1)
+      (message "Irony server isn't installed")))
 
+  (setq irony-cdb-search-directory-list '("." "build" "build-conda"))
 
-;;
-;; Tools
-;;
+  (use-package! irony-eldoc
+    :hook (irony-mode . irony-eldoc))
 
-(def-package! disaster :commands disaster)
+  (use-package! flycheck-irony
+    :when (and (modulep! :checkers syntax)
+               (not (modulep! :checkers syntax +flymake)))
+    :config (flycheck-irony-setup))
+
+  (use-package! company-irony
+    :when (modulep! :completion company)
+    :init (set-company-backend! 'irony-mode '(:separate company-irony-c-headers company-irony))
+    :config (require 'company-irony-c-headers)))
 
 
 ;;
 ;; Major modes
-;;
 
-(def-package! cmake-mode
-  :mode "/CMakeLists\\.txt$"
-  :mode "\\.cmake\\$"
-  :config
-  (set! :company-backend 'cmake-mode '(company-cmake company-yasnippet)))
+(after! cmake-mode
+  (set-docsets! 'cmake-mode "CMake")
+  (set-popup-rule! "^\\*CMake Help\\*" :size 0.4 :ttl t)
+  (set-lookup-handlers! 'cmake-mode
+    :documentation '+cc-cmake-lookup-documentation-fn))
 
-(def-package! cuda-mode :mode "\\.cuh?$")
 
-(def-package! opencl-mode :mode "\\.cl$")
+(use-package! company-cmake  ; for `cmake-mode'
+  :when (modulep! :completion company)
+  :after cmake-mode
+  :config (set-company-backend! 'cmake-mode 'company-cmake))
 
-(def-package! demangle-mode
+
+(use-package! demangle-mode
   :hook llvm-mode)
 
-(def-package! glsl-mode
-  :mode "\\.glsl$"
-  :mode "\\.vert$"
-  :mode "\\.frag$"
-  :mode "\\.geom$")
 
-
-;;
-;; Company plugins
-;;
-
-(def-package! company-cmake
-  :when (featurep! :completion company)
-  :after cmake-mode)
-
-(def-package! company-irony
-  :when (featurep! :completion company)
-  :after irony)
-
-(def-package! company-irony-c-headers
-  :when (featurep! :completion company)
-  :after company-irony)
-
-(def-package! company-glsl
-  :when (featurep! :completion company)
+(use-package! company-glsl  ; for `glsl-mode'
+  :when (modulep! :completion company)
   :after glsl-mode
-  :config
-  (if (executable-find "glslangValidator")
-      (warn "glsl-mode: couldn't find glslangValidator, disabling company-glsl")
-    (set! :company-backend 'glsl-mode '(company-glsl))))
+  :config (set-company-backend! 'glsl-mode 'company-glsl))
 
 
 ;;
 ;; Rtags Support
-;;
 
-(def-package! rtags
-  :after cc-mode
+(use-package! rtags
+  :unless (modulep! +lsp)
+  ;; Only initialize rtags-mode if rtags and rdm are available.
+  :hook ((c-mode-local-vars c++-mode-local-vars objc-mode-local-vars) . +cc-init-rtags-maybe-h)
+  :preface (setq rtags-install-path (concat doom-data-dir "rtags/"))
   :config
+  (defun +cc-init-rtags-maybe-h ()
+    "Start an rtags server in c-mode and c++-mode buffers.
+If rtags or rdm aren't available, fail silently instead of throwing a breaking error."
+    (and (require 'rtags nil t)
+         (rtags-executable-find rtags-rdm-binary-name)
+         (rtags-start-process-unless-running)))
+
   (setq rtags-autostart-diagnostics t
         rtags-use-bookmarks nil
         rtags-completions-enabled nil
+        rtags-display-result-backend
+        (cond ((modulep! :completion ivy)  'ivy)
+              ((modulep! :completion helm) 'helm)
+              ('default))
+        ;; These executables are named rtags-* on debian
+        rtags-rc-binary-name
+        (or (cl-find-if #'executable-find (list rtags-rc-binary-name "rtags-rc"))
+            rtags-rc-binary-name)
+        rtags-rdm-binary-name
+        (or (cl-find-if #'executable-find (list rtags-rdm-binary-name "rtags-rdm"))
+            rtags-rdm-binary-name)
         ;; If not using ivy or helm to view results, use a pop-up window rather
         ;; than displaying it in the current window...
         rtags-results-buffer-other-window t
         ;; ...and don't auto-jump to first match before making a selection.
         rtags-jump-to-first-match nil)
 
-  (let ((bins (cl-remove-if-not #'executable-find '("rdm" "rc"))))
-    (if (/= (length bins) 2)
-        (warn "cc-mode: couldn't find %s, disabling rtags support" bins)
-      (add-hook! (c-mode c++-mode) #'rtags-start-process-unless-running)
-      (set! :jump '(c-mode c++-mode)
-        :definition #'rtags-find-symbol-at-point
-        :references #'rtags-find-references-at-point)))
-
-  (add-hook 'doom-cleanup-hook #'rtags-cancel-process)
-  (add-hook! kill-emacs (ignore-errors (rtags-cancel-process)))
+  (set-lookup-handlers! '(c-mode c++-mode)
+    :definition #'rtags-find-symbol-at-point
+    :references #'rtags-find-references-at-point)
 
   ;; Use rtags-imenu instead of imenu/counsel-imenu
-  (map! :map (c-mode-map c++-mode-map) [remap imenu] #'rtags-imenu)
+  (define-key! (c-mode-map c++-mode-map) [remap imenu] #'+cc/imenu)
 
-  (add-hook 'rtags-jump-hook #'evil-set-jump)
-  (add-hook 'rtags-after-find-file-hook #'recenter))
+  ;; Ensure rtags cleans up after itself properly when exiting Emacs, rather
+  ;; than display a jarring confirmation prompt for killing it.
+  (add-hook! 'kill-emacs-hook (ignore-errors (rtags-cancel-process)))
 
-(def-package! ivy-rtags
-  :when (featurep! :completion ivy)
-  :after rtags
+  (add-hook 'rtags-jump-hook #'better-jumper-set-jump))
+
+
+;;
+;; LSP
+
+(when (modulep! +lsp)
+  (add-hook! '(c-mode-local-vars-hook
+               c++-mode-local-vars-hook
+               objc-mode-local-vars-hook
+               cmake-mode-local-vars-hook
+               ;; HACK Can't use cude-mode-local-vars-hook because cuda-mode
+               ;;   isn't a proper major mode (just a plain function
+               ;;   masquarading as one, so your standard mode hooks won't fire
+               ;;   from switching to cuda-mode).
+               cuda-mode-hook)
+             :append #'lsp!)
+
+  (map! :after ccls
+        :map (c-mode-map c++-mode-map)
+        :n "C-h" (cmd! (ccls-navigate "U"))
+        :n "C-j" (cmd! (ccls-navigate "R"))
+        :n "C-k" (cmd! (ccls-navigate "L"))
+        :n "C-l" (cmd! (ccls-navigate "D"))
+        (:localleader
+         :desc "Preprocess file"        "lp" #'ccls-preprocess-file
+         :desc "Reload cache & CCLS"    "lf" #'ccls-reload)
+        (:after lsp-ui-peek
+         (:localleader
+          :desc "Callers list"          "c" #'+cc/ccls-show-caller
+          :desc "Callees list"          "C" #'+cc/ccls-show-callee
+          :desc "References (address)"  "a" #'+cc/ccls-show-references-address
+          :desc "References (not call)" "f" #'+cc/ccls-show-references-not-call
+          :desc "References (Macro)"    "m" #'+cc/ccls-show-references-macro
+          :desc "References (Read)"     "r" #'+cc/ccls-show-references-read
+          :desc "References (Write)"    "w" #'+cc/ccls-show-references-write)))
+
+  (when (modulep! :tools lsp +eglot)
+    ;; Map eglot specific helper
+    (map! :localleader
+          :after cc-mode
+          :map c++-mode-map
+          :desc "Show type inheritance hierarchy" "ct" #'+cc/eglot-ccls-inheritance-hierarchy)
+
+    ;; NOTE : This setting is untested yet
+    (after! eglot
+      (when (featurep :system 'macos)
+        (add-to-list 'eglot-workspace-configuration
+                     `((:ccls . ((:clang . ,(list :extraArgs ["-isystem/Library/Developer/CommandLineTools/usr/include/c++/v1"
+                                                              "-isystem/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"
+                                                              "-isystem/usr/local/include"]
+                                                  :resourceDir (cdr (doom-call-process "clang" "-print-resource-dir"))))))))))))
+
+(use-package! ccls
+  :when (modulep! +lsp)
+  :unless (modulep! :tools lsp +eglot)
+  :defer t
   :init
-  ;; NOTE Ivy integration breaks when rtags is byte-compiled with Emacs 26 or
-  ;; later, so we un-byte-compile it before we load it.
-  (eval-when-compile
-    (when (>= emacs-major-version 26)
-      (when-let* ((elc-file (locate-library "rtags.elc" t doom--package-load-path)))
-        (delete-file elc-file))))
-  :config (setq rtags-display-result-backend 'ivy))
-
-(def-package! helm-rtags
-  :when (featurep! :completion helm)
-  :after rtags
-  :config (setq rtags-display-result-backend 'helm))
+  (defvar ccls-sem-highlight-method 'font-lock)
+  (after! projectile
+    (add-to-list 'projectile-globally-ignored-directories "^.ccls-cache$")
+    (add-to-list 'projectile-project-root-files-bottom-up ".ccls-root")
+    (add-to-list 'projectile-project-root-files-top-down-recurring "compile_commands.json"))
+  ;; Avoid using `:after' because it ties the :config below to when `lsp-mode'
+  ;; loads, rather than `ccls' loads.
+  (after! lsp-mode (require 'ccls))
+  :config
+  (set-evil-initial-state! 'ccls-tree-mode 'emacs)
+  ;; Disable `ccls-sem-highlight-method' if `lsp-enable-semantic-highlighting'
+  ;; is nil. Otherwise, it appears ccls bypasses it.
+  (setq-hook! 'lsp-configure-hook
+    ccls-sem-highlight-method (if lsp-enable-semantic-highlighting
+                                  ccls-sem-highlight-method))
+  (when (or (featurep :system 'macos)
+            (featurep :system 'linux))
+    (setq ccls-initialization-options
+          `(:index (:trackDependency 1
+                    :threads ,(max 1 (/ (doom-system-cpus) 2))))))
+  (when (featurep :system 'macos)
+    (setq ccls-initialization-options
+          (append ccls-initialization-options
+                  `(:clang ,(list :extraArgs ["-isystem/Library/Developer/CommandLineTools/usr/include/c++/v1"
+                                              "-isystem/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include"
+                                              "-isystem/usr/local/include"]
+                                  :resourceDir (cdr (doom-call-process "clang" "-print-resource-dir"))))))))

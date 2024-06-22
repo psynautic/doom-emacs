@@ -1,9 +1,4 @@
 ;; -*- no-byte-compile: t; -*-
 ;;; lang/data/packages.el
 
-(package! dockerfile-mode)
-(package! json-mode)
-(package! toml-mode)
-(package! vimrc-mode)
-(package! yaml-mode)
-
+(package! csv-mode :pin "81c1a9febd2adf79cfbdf939081ef7bf3a41ffd6")

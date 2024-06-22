@@ -1,42 +1,98 @@
-;;; lang/lua/config.el --- lua + Love2D -*- lexical-binding: t; -*-
+;;; lang/lua/config.el -*- lexical-binding: t; -*-
 
-(def-package! lua-mode
-  :mode "\\.lua$"
-  :interpreter "lua"
-  :config
-  (add-hook 'lua-mode-hook #'flycheck-mode)
-
-  (set! :electric 'lua-mode :words '("else" "end"))
-  (set! :repl 'lua-mode #'+lua/repl)
-  ;; sp's lua-specific rules are obnoxious, so we disable them
-  (setq sp-pairs (delete (assq 'lua-mode sp-pairs) sp-pairs))
-
-  (def-menu! +lua/build-menu
-    "Build/compilation commands for `lua-mode' buffers."
-    '(("Run Love app" :exec +lua/run-love-game :when +lua-love-mode))
-    :prompt "Build tasks: ")
-
-  (map! :map lua-mode-map
-        :localleader
-        "b" #'+lua/build-menu))
-
-
-(def-package! company-lua
-  :after (:all company lua-mode)
-  :config
-  (set! :company-backend 'lua-mode '(company-lua company-yasnippet)))
-
-
-(def-package! moonscript
-  :mode ("\\.moon$" . moonscript-mode)
-  :config (defvaralias 'moonscript-indent-offset 'tab-width))
+;; sp's default rules are obnoxious, so disable them
+(provide 'smartparens-lua)
 
 
 ;;
-;; Frameworks
+;;; Major modes
+
+(use-package! lua-mode
+  :defer t
+  :init
+  ;; lua-indent-level defaults to 3 otherwise. Madness.
+  (setq lua-indent-level 2)
+  :config
+  (set-lookup-handlers! 'lua-mode :documentation 'lua-search-documentation)
+  (set-electric! 'lua-mode :words '("else" "end"))
+  (set-repl-handler! 'lua-mode #'+lua/open-repl)
+  (set-company-backend! 'lua-mode '(company-lua company-yasnippet))
+
+  (when (modulep! +lsp)
+    (add-hook 'lua-mode-local-vars-hook #'lsp! 'append)
+
+    (when (modulep! :tools lsp +eglot)
+      (defvar +lua-lsp-dir (concat doom-data-dir "lsp/lua-language-server/")
+        "Absolute path to the directory of sumneko's lua-language-server.
+
+This directory MUST contain the 'main.lua' file and be the in-source build of
+lua-language-server.")
+
+      (defun +lua-generate-lsp-server-command ()
+        ;; The absolute path to lua-language-server binary is necessary because
+        ;; the bundled dependencies aren't found otherwise. The only reason this
+        ;; is a function is to dynamically change when/if `+lua-lsp-dir' does
+        (list (or (executable-find "lua-language-server")
+                  (doom-path +lua-lsp-dir
+                             (cond ((featurep :system 'macos)   "bin/macOS")
+                                   ((featurep :system 'linux)   "bin/Linux")
+                                   ((featurep :system 'windows) "bin/Windows"))
+                             "lua-language-server"))
+              "-E" "-e" "LANG=en"
+              (doom-path +lua-lsp-dir "main.lua")))
+
+      (set-eglot-client! 'lua-mode (+lua-generate-lsp-server-command)))
+
+    (when (modulep! +tree-sitter)
+      (add-hook 'lua-mode-local-vars-hook #'tree-sitter! 'append))))
+
+
+(use-package! moonscript
+  :when (modulep! +moonscript)
+  :defer t
+  :config
+  (setq-hook! 'moonscript-mode-hook
+    moonscript-indent-offset tab-width)
+  (add-hook! 'moonscript-mode-hook
+             #'+lua-moonscript-fix-single-quotes-h
+             #'+lua-moonscript-fontify-interpolation-h)
+  (when (and (modulep! :checkers syntax)
+             (not (modulep! :checkers syntax +flymake)))
+    (require 'flycheck-moonscript nil t)))
+
+
+(use-package! fennel-mode
+  :when (modulep! +fennel)
+  :mode "\\.fenneldoc\\'"
+  :hook (fennel-mode . rainbow-delimiters-mode)
+  :config
+  (set-lookup-handlers! 'fennel-mode
+    :definition #'fennel-find-definition
+    :documentation #'fennel-show-documentation)
+  (set-repl-handler! 'fennel-mode #'fennel-repl)
+
+  (setq-hook! 'fennel-mode-hook
+    ;; To match the `tab-width' default for other lisp modes
+    tab-width 2
+    ;; Don't treat autoloads or sexp openers as outline headers, we have
+    ;; hideshow for that.
+    outline-regexp "[ \t]*;;;;* [^ \t\n]")
+
+  (when (modulep! +tree-sitter)
+    (add-hook! 'fennel-mode-local-vars-hook 'tree-sitter! 'append)))
+
+
 ;;
+;;; Frameworks
 
 (def-project-mode! +lua-love-mode
-  :modes (lua-mode markdown-mode json-mode)
-  :files (and "main.lua" "conf.lua"))
-
+  :modes '(moonscript-mode lua-mode markdown-mode json-mode)
+  :when (+lua-love-project-root)
+  :on-load
+  (progn
+    (set-project-type! 'love2d
+      :predicate #'+lua-love-project-root
+      :run #'+lua-love-build-command)
+    (map! :localleader
+          :map +lua-love-mode-map
+          "b" #'+lua/run-love-game)))

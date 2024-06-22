@@ -2,6 +2,7 @@
 
 (defvar +web-entities-list
   [["&amp;" "&"] ["&nbsp;" " "] ["&ensp;" " "] ["&emsp;" " "] ["&thinsp;" " "]
+   ["&lt;" "<"] ["&gt;" ">"]
    ["&rlm;" "‏"] ["&lrm;" "‎"] ["&zwj;" "‍"] ["&zwnj;" "‌"]
    ["&iexcl;" "¡"] ["&cent;" "¢"] ["&pound;" "£"] ["&curren;" "¤"] ["&yen;" "¥"]
    ["&brvbar;" "¦"] ["&sect;" "§"] ["&uml;" "¨"] ["&copy;" "©"] ["&ordf;" "ª"]
@@ -61,13 +62,14 @@ character.")
   "HTML encode/decode TEXT. Based on Xah's replace HTML named entities function
 @ http://ergoemacs.org/emacs/elisp_replace_html_entities_command.html"
   (interactive "<!><r>")
-  (seq-doseq (rep +web-entities-list)
-    (let ((from (elt rep (if decode-p 0 1)))
-          (to   (elt rep (if decode-p 1 0)))
-          case-fold-search)
-      (when (and (not (equal from " "))
-                 (string-match-p (regexp-quote from) text))
-        (setq text (replace-regexp-in-string (regexp-quote from) to text t t)))))
+  (mapc (lambda (rep)
+          (let ((from (elt rep (if decode-p 0 1)))
+                (to   (elt rep (if decode-p 1 0)))
+                case-fold-search)
+            (when (and (not (equal from " "))
+                       (string-match-p (regexp-quote from) text))
+              (setq text (replace-regexp-in-string (regexp-quote from) to text t t)))))
+        +web-entities-list)
   text)
 
 (defun +web--entities-region (beg end &optional decode-p)
@@ -75,14 +77,15 @@ character.")
 function @ http://ergoemacs.org/emacs/elisp_replace_html_entities_command.html"
   (save-restriction
     (narrow-to-region beg end)
-    (seq-doseq (rep +web-entities-list)
-      (let ((from (elt rep (if decode-p 0 1)))
-            (to   (elt rep (if decode-p 1 0)))
-            case-fold-search)
-        (unless (equal from " ")
-          (goto-char (point-min))
-          (while (search-forward from nil t)
-            (replace-match to 'FIXEDCASE 'LITERAL)))))))
+    (mapc (lambda (rep)
+            (let ((from (elt rep (if decode-p 0 1)))
+                  (to   (elt rep (if decode-p 1 0)))
+                  case-fold-search)
+              (unless (equal from " ")
+                (goto-char (point-min))
+                (while (search-forward from nil t)
+                  (replace-match to 'FIXEDCASE 'LITERAL)))))
+          +web-entities-list)))
 
 ;;;###autoload
 (defun +web-encode-entities (text)
@@ -93,6 +96,10 @@ function @ http://ergoemacs.org/emacs/elisp_replace_html_entities_command.html"
 (defun +web-decode-entities (text)
   "TODO"
   (+web--entities-string text t))
+
+
+;;
+;;; Commands
 
 ;;;###autoload
 (defun +web/encode-entities-region (beg end)
@@ -105,3 +112,24 @@ function @ http://ergoemacs.org/emacs/elisp_replace_html_entities_command.html"
   "Decode HTML entities in region."
   (interactive "r")
   (+web--entities-region beg end t))
+
+;;;###autoload
+(defun +web/indent-or-yas-or-emmet-expand ()
+  "Do-what-I-mean on TAB.
+
+Invokes `indent-for-tab-command' if at or before text bol, `yas-expand' if on a
+snippet, or `emmet-expand-yas'/`emmet-expand-line', depending on whether
+`yas-minor-mode' is enabled or not."
+  (interactive)
+  (call-interactively
+   (cond ((or (<= (current-column) (current-indentation))
+              (not (eolp))
+              (not (or (memq (char-after) (list ?\n ?\s ?\t))
+                       (eobp))))
+          #'indent-for-tab-command)
+         ((modulep! :editor snippets)
+          (require 'yasnippet)
+          (if (yas--templates-for-key-at-point)
+              #'yas-expand
+            #'emmet-expand-yas))
+         (#'emmet-expand-line))))

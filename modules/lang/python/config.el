@@ -1,128 +1,351 @@
 ;;; lang/python/config.el -*- lexical-binding: t; -*-
 
-(defvar +python-pyenv-root nil
-  "The path to pyenv's root directory. This is automatically set when `python'
-is loaded.")
+(defvar +python-ipython-command '("ipython" "-i" "--simple-prompt" "--no-color-info")
+  "Command to initialize the ipython REPL for `+python/open-ipython-repl'.")
 
-(defvar +python-pyenv-versions nil
-  "Available versions of python in pyenv.")
+(defvar +python-jupyter-command '("jupyter" "console" "--simple-prompt")
+  "Command to initialize the jupyter REPL for `+python/open-jupyter-repl'.")
 
-(defvar-local +python-current-version nil
-  "The currently active pyenv version.")
+(after! projectile
+  (pushnew! projectile-project-root-files "pyproject.toml" "requirements.txt" "setup.py"))
 
 
 ;;
-;; Plugins
-;;
+;;; Packages
 
-(def-package! python
-  :commands python-mode
+(use-package! python
+  :mode ("[./]flake8\\'" . conf-mode)
+  :mode ("/Pipfile\\'" . conf-mode)
   :init
   (setq python-environment-directory doom-cache-dir
-        python-indent-guess-indent-offset-verbose nil
-        python-shell-interpreter "python")
+        python-indent-guess-indent-offset-verbose nil)
+
+  (when (modulep! +lsp)
+    (add-hook 'python-mode-local-vars-hook #'lsp! 'append)
+    ;; Use "mspyls" in eglot if in PATH
+    (when (executable-find "Microsoft.Python.LanguageServer")
+      (set-eglot-client! 'python-mode '("Microsoft.Python.LanguageServer"))))
+
+  (when (modulep! +tree-sitter)
+    (add-hook 'python-mode-local-vars-hook #'tree-sitter! 'append))
   :config
-  (add-hook! 'python-mode-hook #'(flycheck-mode highlight-numbers-mode))
+  (set-repl-handler! 'python-mode #'+python/open-repl
+    :persist t
+    :send-region #'python-shell-send-region
+    :send-buffer #'python-shell-send-buffer)
+  (set-docsets! '(python-mode inferior-python-mode) "Python 3" "NumPy" "SciPy" "Pandas")
 
-  (set! :repl 'python-mode #'+python/repl)
-  (set! :electric 'python-mode :chars '(?:))
+  (set-ligatures! 'python-mode
+    ;; Functional
+    :def "def"
+    :lambda "lambda"
+    ;; Types
+    :null "None"
+    :true "True" :false "False"
+    :int "int" :str "str"
+    :float "float"
+    :bool "bool"
+    :tuple "tuple"
+    ;; Flow
+    :not "not"
+    :in "in" :not-in "not in"
+    :and "and" :or "or"
+    :for "for"
+    :return "return" :yield "yield")
 
-  (when (executable-find "ipython")
-    (setq python-shell-interpreter "ipython"
-          python-shell-interpreter-args "-i --simple-prompt --no-color-info"
-          python-shell-prompt-regexp "In \\[[0-9]+\\]: "
-          python-shell-prompt-block-regexp "\\.\\.\\.\\.: "
-          python-shell-prompt-output-regexp "Out\\[[0-9]+\\]: "
-          python-shell-completion-setup-code
-          "from IPython.core.completerlib import module_completion"
-          python-shell-completion-string-code
-          "';'.join(get_ipython().Completer.all_completions('''%s'''))\n"))
+  ;; Stop the spam!
+  (setq python-indent-guess-indent-offset-verbose nil)
 
-  ;; Version management with pyenv
-  (defun +python|add-version-to-modeline ()
-    "Add version string to the major mode in the modeline."
-    (setq mode-name
-          (if +python-current-version
-              (format "Python %s" +python-current-version)
-            "Python")))
-  (add-hook 'python-mode-hook #'+python|add-version-to-modeline)
+  ;; Default to Python 3. Prefer the versioned Python binaries since some
+  ;; systems link the unversioned one to Python 2.
+  (when (and (executable-find "python3")
+             (string= python-shell-interpreter "python"))
+    (setq python-shell-interpreter "python3"))
 
-  (if (not (executable-find "pyenv"))
-      (setq +python-current-version (string-trim (shell-command-to-string "python --version 2>&1 | cut -d' ' -f2")))
-    (setq +python-pyenv-root     (string-trim (shell-command-to-string "pyenv root"))
-          +python-pyenv-versions (split-string (shell-command-to-string "pyenv versions --bare") "\n" t))
+  (add-hook! 'python-mode-hook
+    (defun +python-use-correct-flycheck-executables-h ()
+      "Use the correct Python executables for Flycheck."
+      (let ((executable python-shell-interpreter))
+        (save-excursion
+          (goto-char (point-min))
+          (save-match-data
+            (when (or (looking-at "#!/usr/bin/env \\(python[^ \n]+\\)")
+                      (looking-at "#!\\([^ \n]+/python[^ \n]+\\)"))
+              (setq executable (substring-no-properties (match-string 1))))))
+        ;; Try to compile using the appropriate version of Python for
+        ;; the file.
+        (setq-local flycheck-python-pycompile-executable executable)
+        ;; We might be running inside a virtualenv, in which case the
+        ;; modules won't be available. But calling the executables
+        ;; directly will work.
+        (setq-local flycheck-python-pylint-executable "pylint")
+        (setq-local flycheck-python-flake8-executable "flake8"))))
 
-    (defun +python|detect-pyenv-version ()
-      "Detect the pyenv version for the current project and set the relevant
-environment variables."
-      (when-let* ((version-str (shell-command-to-string "python --version 2>&1 | cut -d' ' -f2")))
-        (setq version-str (string-trim version-str)
-              +python-current-version version-str)
-        (let ((pyenv-current-path (concat +python-pyenv-root "/versions/" version-str)))
-          (when (file-directory-p pyenv-current-path)
-            (setq pythonic-environment pyenv-current-path)))
-        (when (member version-str +python-pyenv-versions)
-          (setenv "PYENV_VERSION" version-str))))
-    (add-hook 'python-mode-hook #'+python|detect-pyenv-version))
+  ;; Affects pyenv and conda
+  (when (modulep! :ui modeline)
+    (advice-add #'pythonic-activate :after-while #'+modeline-update-env-in-all-windows-h)
+    (advice-add #'pythonic-deactivate :after #'+modeline-clear-env-in-all-windows-h))
 
-  (define-key python-mode-map (kbd "DEL") nil) ; interferes with smartparens
-  (sp-with-modes 'python-mode
-    (sp-local-pair "'" nil :unless '(sp-point-before-word-p sp-point-after-word-p sp-point-before-same-p))))
+  (setq-hook! 'python-mode-hook tab-width python-indent-offset))
 
 
-(def-package! anaconda-mode
-  :after python
-  :hook python-mode
+(use-package! anaconda-mode
+  :defer t
   :init
-  (setq anaconda-mode-installation-directory (concat doom-etc-dir "anaconda/")
+  (setq anaconda-mode-installation-directory (concat doom-data-dir "anaconda/")
         anaconda-mode-eldoc-as-single-line t)
-  :config
-  (add-hook 'anaconda-mode-hook #'anaconda-eldoc-mode)
-  (set! :popup "*anaconda-mode*" :size 10 :noselect t :autoclose t :autokill t)
-  (map! :map anaconda-mode-map :m "gd" #'anaconda-mode-find-definitions)
-  (advice-add #'anaconda-mode-doc-buffer :after #'doom*anaconda-mode-doc-buffer))
 
-
-(def-package! company-anaconda
-  :when (featurep! :completion company)
-  :after anaconda-mode
+  (add-hook! 'python-mode-local-vars-hook :append
+    (defun +python-init-anaconda-mode-maybe-h ()
+      "Enable `anaconda-mode' if `lsp-mode' is absent and
+`python-shell-interpreter' is present."
+      (unless (or (bound-and-true-p lsp-mode)
+                  (bound-and-true-p eglot--managed-mode)
+                  (bound-and-true-p lsp--buffer-deferred)
+                  (not (executable-find python-shell-interpreter t)))
+        (anaconda-mode +1))))
   :config
-  (set! :company-backend 'python-mode '(company-anaconda))
-  (set! :jump 'python-mode
+  (set-company-backend! 'anaconda-mode '(company-anaconda))
+  (set-lookup-handlers! 'anaconda-mode
     :definition #'anaconda-mode-find-definitions
-    :references #'anaconda-mode-find-referenences
+    :references #'anaconda-mode-find-references
     :documentation #'anaconda-mode-show-doc)
+  (set-popup-rule! "^\\*anaconda-mode" :select nil)
+
+  (add-hook 'anaconda-mode-hook #'anaconda-eldoc-mode)
+
+  (defun +python-auto-kill-anaconda-processes-h ()
+    "Kill anaconda processes if this buffer is the last python buffer."
+    (when (and (eq major-mode 'python-mode)
+               (not (delq (current-buffer)
+                          (doom-buffers-in-mode 'python-mode (buffer-list)))))
+      (anaconda-mode-stop)))
+  (add-hook! 'python-mode-hook
+    (add-hook 'kill-buffer-hook #'+python-auto-kill-anaconda-processes-h
+              nil 'local))
+
+  (when (featurep 'evil)
+    (add-hook 'anaconda-mode-hook #'evil-normalize-keymaps))
+  (map! :localleader
+        :map anaconda-mode-map
+        :prefix "g"
+        "d" #'anaconda-mode-find-definitions
+        "h" #'anaconda-mode-show-doc
+        "a" #'anaconda-mode-find-assignments
+        "f" #'anaconda-mode-find-file
+        "u" #'anaconda-mode-find-references))
+
+
+(use-package! pyimport
+  :defer t
+  :init
+  (map! :after python
+        :map python-mode-map
+        :localleader
+        (:prefix ("i" . "imports")
+          :desc "Insert missing imports" "i" #'pyimport-insert-missing
+          :desc "Remove unused imports"  "R" #'pyimport-remove-unused
+          :desc "Optimize imports"       "o" #'+python/optimize-imports)))
+
+
+(use-package! py-isort
+  :defer t
+  :init
+  (map! :after python
+        :map python-mode-map
+        :localleader
+        (:prefix ("i" . "imports")
+          :desc "Sort imports"      "s" #'py-isort-buffer
+          :desc "Sort region"       "r" #'py-isort-region)))
+
+(use-package! nose
+  :commands nose-mode
+  :preface (defvar nose-mode-map (make-sparse-keymap))
+  :minor ("/test_.+\\.py$" . nose-mode)
+  :config
+  (set-popup-rule! "^\\*nosetests" :size 0.4 :select nil)
+  (set-yas-minor-mode! 'nose-mode)
+  (when (featurep 'evil)
+    (add-hook 'nose-mode-hook #'evil-normalize-keymaps))
+
+  (map! :localleader
+        :map nose-mode-map
+        :prefix "t"
+        "r" #'nosetests-again
+        "a" #'nosetests-all
+        "s" #'nosetests-one
+        "v" #'nosetests-module
+        "A" #'nosetests-pdb-all
+        "O" #'nosetests-pdb-one
+        "V" #'nosetests-pdb-module))
+
+
+(use-package! python-pytest
+  :commands python-pytest-dispatch
+  :init
+  (map! :after python
+        :localleader
+        :map python-mode-map
+        :prefix ("t" . "test")
+        "a" #'python-pytest
+        "f" #'python-pytest-file-dwim
+        "F" #'python-pytest-file
+        "t" #'python-pytest-function-dwim
+        "T" #'python-pytest-function
+        "r" #'python-pytest-repeat
+        "p" #'python-pytest-dispatch))
+
+
+;;
+;;; Environment management
+
+(use-package! pipenv
+  :commands pipenv-project-p
+  :hook (python-mode . pipenv-mode)
+  :init (setq pipenv-with-projectile nil)
+  :config
+  (set-eval-handler! 'python-mode
+    '((:command . (lambda () python-shell-interpreter))
+      (:exec (lambda ()
+               (if-let* ((bin (executable-find "pipenv" t))
+                         (_ (pipenv-project-p)))
+                   (format "PIPENV_MAX_DEPTH=9999 %s run %%c %%o %%s %%a" bin)
+                 "%c %o %s %a")))
+      (:description . "Run Python script")))
   (map! :map python-mode-map
         :localleader
-        :prefix "f"
-        :nv "d" #'anaconda-mode-find-definitions
-        :nv "h" #'anaconda-mode-show-doc
-        :nv "a" #'anaconda-mode-find-assignments
-        :nv "f" #'anaconda-mode-find-file
-        :nv "u" #'anaconda-mode-find-references))
+        :prefix "e"
+        :desc "activate"    "a" #'pipenv-activate
+        :desc "deactivate"  "d" #'pipenv-deactivate
+        :desc "install"     "i" #'pipenv-install
+        :desc "lock"        "l" #'pipenv-lock
+        :desc "open module" "o" #'pipenv-open
+        :desc "run"         "r" #'pipenv-run
+        :desc "shell"       "s" #'pipenv-shell
+        :desc "uninstall"   "u" #'pipenv-uninstall))
 
 
-(def-package! pip-requirements
-  :mode ("/requirements.txt$" . pip-requirements-mode))
-
-
-(def-package! nose
-  :commands nose-mode
-  :preface
-  (defvar nose-mode-map (make-sparse-keymap))
+(use-package! pyvenv
+  :after python
   :init
-  (associate! nose-mode :match "/test_.+\\.py$" :modes (python-mode))
+  (when (modulep! :ui modeline)
+    (add-hook 'pyvenv-post-activate-hooks #'+modeline-update-env-in-all-windows-h)
+    (add-hook 'pyvenv-pre-deactivate-hooks #'+modeline-clear-env-in-all-windows-h))
   :config
-  (set! :popup "*nosetests*" :size 0.4 :noselect t)
-  (set! :yas-minor-mode 'nose-mode)
-  (map! :map nose-mode-map
-        :localleader
-        :prefix "t"
-        :n "r" #'nosetests-again
-        :n "a" #'nosetests-all
-        :n "s" #'nosetests-one
-        :n "v" #'nosetests-module
-        :n "A" #'nosetests-pdb-all
-        :n "O" #'nosetests-pdb-one
-        :n "V" #'nosetests-pdb-module))
+  (add-hook 'python-mode-local-vars-hook #'pyvenv-track-virtualenv)
+  (add-to-list 'global-mode-string
+               '(pyvenv-virtual-env-name (" venv:" pyvenv-virtual-env-name " "))
+               'append))
 
+
+
+(use-package! pyenv-mode
+  :when (modulep! +pyenv)
+  :after python
+  :config
+  (when (executable-find "pyenv")
+    (pyenv-mode +1)
+    (add-to-list 'exec-path (expand-file-name "shims" (or (getenv "PYENV_ROOT") "~/.pyenv"))))
+  (add-hook 'python-mode-local-vars-hook #'+python-pyenv-mode-set-auto-h)
+  (add-hook 'doom-switch-buffer-hook #'+python-pyenv-mode-set-auto-h))
+
+
+(use-package! conda
+  :when (modulep! +conda)
+  :after python
+  :config
+  ;; The location of your anaconda home will be guessed from a list of common
+  ;; possibilities, starting with `conda-anaconda-home''s default value (which
+  ;; will consult a ANACONDA_HOME envvar, if it exists).
+  ;;
+  ;; If none of these work for you, `conda-anaconda-home' must be set
+  ;; explicitly. Afterwards, run M-x `conda-env-activate' to switch between
+  ;; environments
+  (or (cl-loop for dir in (list conda-anaconda-home
+                                "~/.anaconda"
+                                "~/.miniconda"
+                                "~/.miniconda3"
+                                "~/.miniforge3"
+                                "~/anaconda3"
+                                "~/miniconda3"
+                                "~/miniforge3"
+                                "~/opt/miniconda3"
+                                "/usr/bin/anaconda3"
+                                "/usr/local/anaconda3"
+                                "/usr/local/miniconda3"
+                                "/usr/local/Caskroom/miniconda/base"
+                                "~/.conda")
+               if (file-directory-p dir)
+               return (setq conda-anaconda-home (expand-file-name dir)
+                            conda-env-home-directory (expand-file-name dir)))
+      (message "Cannot find Anaconda installation"))
+
+  ;; integration with term/eshell
+  (conda-env-initialize-interactive-shells)
+  (after! eshell (conda-env-initialize-eshell))
+
+  (add-to-list 'global-mode-string
+               '(conda-env-current-name (" conda:" conda-env-current-name " "))
+               'append))
+
+
+(use-package! poetry
+  :when (modulep! +poetry)
+  :after python
+  :init
+  (setq poetry-tracking-strategy 'switch-buffer)
+  (add-hook 'python-mode-hook #'poetry-tracking-mode))
+
+
+(use-package! cython-mode
+  :when (modulep! +cython)
+  :mode "\\.p\\(yx\\|x[di]\\)\\'"
+  :config
+  (setq cython-default-compile-format "cython -a %s")
+  (map! :map cython-mode-map
+        :localleader
+        :prefix "c"
+        :desc "Cython compile buffer"    "c" #'cython-compile))
+
+
+(use-package! flycheck-cython
+  :when (modulep! +cython)
+  :when (and (modulep! :checkers syntax)
+             (not (modulep! :checkers syntax +flymake)))
+  :after cython-mode)
+
+
+(use-package! pip-requirements
+  :defer t
+  :config
+  ;; HACK `pip-requirements-mode' performs a sudden HTTP request to
+  ;;   https://pypi.org/simple, which causes unexpected hangs (see #5998). This
+  ;;   advice defers this behavior until the first time completion is invoked.
+  ;; REVIEW More sensible behavior should be PRed upstream.
+  (defadvice! +python--init-completion-a (&rest args)
+    "Call `pip-requirements-fetch-packages' first time completion is invoked."
+    :before #'pip-requirements-complete-at-point
+    (unless pip-packages (pip-requirements-fetch-packages)))
+  (defadvice! +python--inhibit-pip-requirements-fetch-packages-a (fn &rest args)
+    "No-op `pip-requirements-fetch-packages', which can be expensive."
+    :around #'pip-requirements-mode
+    (letf! ((#'pip-requirements-fetch-packages #'ignore))
+      (apply fn args))))
+
+
+;;
+;;; LSP
+
+(eval-when! (and (modulep! +lsp)
+                 (not (modulep! :tools lsp +eglot)))
+
+  (use-package! lsp-python-ms
+    :unless (modulep! +pyright)
+    :after lsp-mode
+    :preface
+    (after! python
+      (setq lsp-python-ms-python-executable-cmd python-shell-interpreter)))
+
+  (use-package! lsp-pyright
+    :when (modulep! +pyright)
+    :after lsp-mode))

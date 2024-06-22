@@ -1,41 +1,39 @@
 ;;; lang/java/+meghanada.el -*- lexical-binding: t; -*-
-;;;###if (featurep! +meghanada)
+;;;###if (modulep! +meghanada)
 
-(def-package! meghanada
-  :hook (java-mode . meghanada-mode)
-  :config
-  (setq meghanada-server-install-dir (concat doom-etc-dir "meghanada-server/")
-        meghanada-use-company (featurep! :completion company)
-        meghanada-use-flycheck (featurep! :feature syntax-checker)
+(use-package! meghanada
+  :hook (java-mode-local-vars . meghanada-mode)
+  :init
+  (setq meghanada-server-install-dir (concat doom-data-dir "meghanada-server/")
+        meghanada-use-company (modulep! :completion company)
+        meghanada-use-flycheck (or (modulep! :checkers syntax +flymake)
+                                   (not (modulep! :checkers syntax)))
         meghanada-use-eldoc t
         meghanada-use-auto-start t)
 
-  (set! :jump 'java-mode
+  :config
+  (set-lookup-handlers! 'java-mode
     :definition #'meghanada-jump-declaration
     :references #'meghanada-reference)
 
-  (add-hook! 'meghanada-mode-hook #'(flycheck-mode eldoc-mode))
+  (defadvice! +java-meghanada-fail-gracefully-a (fn &rest args)
+    "Toggle `meghanada-mode'. Fail gracefully if java is unavailable."
+    :around #'meghanada-mode
+    (if (executable-find meghanada-java-path)
+        (apply fn args)
+      (message "Can't find %S binary. Is java installed? Aborting `meghanada-mode'."
+               meghanada-java-path)))
 
-  ;;
-  (def-menu! +java/refactor-menu
-    "Refactoring commands for `java-mode' buffers."
-    '(("Add imports for unqualified classes" :exec meghanada-import-all)
-      ("Optimize and clean up imports" :exec meghanada-optimize-import)
-      ("Introduce local variable" :exec meghanada-local-variable)
-      ("Format buffer code" :exec meghanada-code-beautify)))
-
-  (def-menu! +java/help-menu
-    "Help and information commands for `java-mode' buffers."
-    '(("Find usages" :exec meghanada-reference)
-      ("Show type hierarchives and implemented interfaces" :exec meghanada-typeinfo)))
-
-  (def-menu! +java/project-menu
-    "Project commands for `java-mode' buffers."
-    '(("Compile current file" :exec meghanada-compile-file)
-      ("Compile project" :exec meghanada-compile-project)))
-
-  (map! :map java-mode-map
-        :localleader
-        :nv "r" #'+java/refactor-menu
-        :nv "c" #'+java/compile-menu
-        :nv "p" #'+java/project-menu))
+  (map! :localleader
+        :map java-mode-map
+        (:prefix ("r" . "refactor")
+          "ia" #'meghanada-import-all
+          "io" #'meghanada-optimize-import
+          "l"  #'meghanada-local-variable
+          "f"  #'meghanada-code-beautify)
+        (:prefix ("h" . "help")
+          "r"  #'meghanada-reference
+          "t"  #'meghanada-typeinfo)
+        (:prefix ("b" . "build")
+          "f"  #'meghanada-compile-file
+          "p"  #'meghanada-compile-project)))

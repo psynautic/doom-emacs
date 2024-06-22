@@ -1,18 +1,43 @@
 ;;; ui/nav-flash/config.el -*- lexical-binding: t; -*-
 
-(def-package! nav-flash
-  :commands nav-flash-show
+(defvar +nav-flash-exclude-commands
+  '(mouse-set-point mouse-drag-region evil-mouse-drag-region +org/dwim-at-point
+    org-find-file org-find-file-at-mouse)
+  "A list of commands that should not trigger nav-flash.")
+
+(defvar +nav-flash-exclude-modes
+  '(so-long-mode special-mode comint-mode term-mode vterm-mode)
+  "List of major modes where nav-flash won't automatically trigger.")
+
+
+;;
+;;; Packages
+
+;; DEPRECATED To be replaced with pulsar.el when Emacs 28 support is dropped
+(use-package! nav-flash
+  :defer t
   :init
-  ;; NOTE In :feature jump `recenter' is hooked to a bunch of jumping commands,
-  ;; which will trigger nav-flash.
-  (advice-add #'windmove-do-window-select :around #'+doom*blink-cursor-maybe)
-  (advice-add #'recenter :around #'+doom*blink-cursor-maybe)
+  ;; NOTE In :tools lookup `recenter' is hooked to a bunch of jumping
+  ;; commands, which will trigger nav-flash.
+  (add-hook! '(imenu-after-jump-hook
+               better-jumper-post-jump-hook
+               counsel-grep-post-action-hook
+               consult-after-jump-hook
+               dumb-jump-after-jump-hook)
+             #'+nav-flash-blink-cursor-maybe-h)
 
-  (after! evil
-    (advice-add #'evil--jumps-jump   :after #'+doom/blink-cursor)
+  (add-hook 'doom-switch-window-hook #'+nav-flash-blink-cursor-maybe-h)
 
-    (advice-add #'evil-window-top    :after #'+doom/blink-cursor)
-    (advice-add #'evil-window-middle :after #'+doom/blink-cursor)
-    (advice-add #'evil-window-bottom :after #'+doom/blink-cursor)))
+  ;; `org'
+  (add-hook 'org-follow-link-hook #'+nav-flash-delayed-blink-cursor-h)
 
+  ;; `saveplace'
+  (advice-add #'save-place-find-file-hook :after #'+nav-flash-blink-cursor-a)
 
+  ;; `evil'
+  (advice-add #'evil-window-top    :after #'+nav-flash-blink-cursor-a)
+  (advice-add #'evil-window-middle :after #'+nav-flash-blink-cursor-a)
+  (advice-add #'evil-window-bottom :after #'+nav-flash-blink-cursor-a)
+
+  ;; Bound to `ga' for evil users
+  (advice-add #'what-cursor-position :after #'+nav-flash-blink-cursor-a))

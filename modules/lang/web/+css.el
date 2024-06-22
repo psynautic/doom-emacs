@@ -1,57 +1,77 @@
 ;;; lang/web/+css.el -*- lexical-binding: t; -*-
 
-;; css-mode hooks apply to scss and less-css modes
-(add-hook 'css-mode-hook #'rainbow-delimiters-mode)
-(add-hook! (css-mode sass-mode)
-  #'(yas-minor-mode-on flycheck-mode highlight-numbers-mode))
+(defvar +web-continue-block-comments t
+  "If non-nil, newlines in block comments are continued with a leading *.
 
-(after! smartparens
-  (sp-with-modes '(css-mode scss-mode less-css-mode stylus-mode)
-    (sp-local-pair "/*" "*/" :post-handlers '(("[d-3]||\n[i]" "RET") ("| " "SPC")))))
+This also indirectly means the asterisks in the opening /* and closing */ will
+be aligned.
 
-(map! :map* (css-mode-map scss-mode-map less-css-mode-map)
-      :n "M-R" #'+css/web-refresh-browser
-      (:localleader
-        :n  "rb" #'+css/toggle-inline-or-block))
+If set to `nil', disable all the above behaviors.")
+
+(add-to-list 'find-sibling-rules '("/\\([^/]+\\)\\.\\(\\(s[ac]\\|le\\)ss\\|styl\\)\\'" "\\1\\.css\\'"))
+(add-to-list 'find-sibling-rules '("/\\([^/]+\\)\\.css\\'" "\\1\\.\\(\\(s[ac]\\|le\\)ss\\|styl\\)\\'"))
 
 
 ;;
-;; Packages
+;;; Major modes
+
+(setq-hook! 'css-mode-hook
+  ;; Correctly continue /* and // comments on newline-and-indent
+  comment-line-break-function #'+css/comment-indent-new-line
+  ;; Fix `fill-paragraph' not conjoining line comments in CSS modes correctly.
+  adaptive-fill-function #'+css-adaptive-fill-fn
+  ;; Fix filled lines not being auto-prefixed with a * when needed.
+  adaptive-fill-first-line-regexp "\\'[ \t]*\\(?:\\* *\\)?\\'")
+
+(after! (:any css-mode sass-mode)
+  (set-docsets! '(css-mode scss-mode sass-mode)
+    "CSS" "HTML" "Bourbon" "Compass"
+    ["Sass" (memq major-mode '(scss-mode sass-mode))]))
+
+(add-hook! '(css-mode-hook sass-mode-hook stylus-mode-hook)
+           #'rainbow-mode)
+
+;; built-in. Contains both css-mode & scss-mode
+(after! css-mode
+  ;; css-mode hooks apply to scss and less-css modes
+  (map! :localleader
+        :map scss-mode-map
+        "b" #'+css/scss-build
+        :map (css-mode-map scss-mode-map less-css-mode-map)
+        "rb" #'+css/toggle-inline-or-block)
+
+  (use-package! counsel-css
+    :when (modulep! :completion ivy)
+    :hook (css-mode . counsel-css-imenu-setup)
+    :init
+    (map! :map (css-mode-map scss-mode-map less-css-mode-map)
+          :localleader ";" #'counsel-css))
+
+  (use-package! helm-css-scss
+    :when (modulep! :completion helm)
+    :defer t
+    :init
+    (map! :map (css-mode-map scss-mode-map less-css-mode-map)
+          :localleader ";" #'helm-css-scss)
+    :config
+    (setq helm-css-scss-split-direction #'split-window-vertically
+          helm-css-scss-split-with-multiple-windows t)))
+
+
+(after! sass-mode
+  (set-company-backend! 'sass-mode 'company-css)
+  (map! :map sass-mode-map :localleader "b" #'+css/sass-build))
+
+
 ;;
+;;; Tools
 
-(def-package! counsel-css
-  :when (featurep! :completion ivy)
-  :commands (counsel-css counsel-css-imenu-setup)
-  :hook (css-mode . counsel-css-imenu-setup)
-  :init
-  (map! :map* (css-mode-map scss-mode-map less-css-mode-map)
-        :localleader :n ";" #'counsel-css))
+(when (modulep! +lsp)
+  (add-hook! '(css-mode-local-vars-hook
+               scss-mode-local-vars-hook
+               sass-mode-local-vars-hook
+               less-css-mode-local-vars-hook)
+             :append #'lsp!))
 
-
-(def-package! rainbow-mode
-  :hook (css-mode sass-mode))
-
-
-(def-package! css-mode
-  :mode "\\.css$"
-  :mode ("\\.scss$" . scss-mode)
-  :config
-  (set! :company-backend '(css-mode scss-mode) '(company-css company-yasnippet))
-  (map! :map scss-mode-map :localleader "b" #'+css/scss-build))
-
-
-(def-package! sass-mode
-  :mode "\\.sass$"
-  :config
-  (set! :company-backend 'sass-mode '(company-css company-yasnippet))
-  (map! :map scss-mode-map :localleader "b" #'+css/sass-build))
-
-
-(def-package! less-css-mode
-  :mode "\\.less$")
-
-
-(def-package! stylus-mode
-  :mode "\\.styl$"
-  :init (add-hook! stylus-mode #'(yas-minor-mode-on flycheck-mode)))
-
+(when (modulep! +tree-sitter)
+  (add-hook 'css-mode-local-vars-hook #'tree-sitter! 'append))

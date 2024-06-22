@@ -1,111 +1,100 @@
-#+TITLE: :lang haskell
+#+title:    :lang haskell
+#+subtitle: A language that's lazier than I am
+#+created:  March 29, 2016
+#+since:    0.9
 
-This module adds [[https://www.haskell.org/][Haskell]] support, powered by either [[https://haskell-lang.org/intero][intero]] (the default) or [[https://github.com/jyp/dante][dante]].
+* Description :unfold:
+This module adds Haskell support to Doom Emacs.
 
-+ Code completion (~company-ghc~)
-+ Look up documentation (~hoogle~)
-+ eldoc support (~dante~)
-+ REPL (~ghci~)
-+ Syntax-checking (~flycheck~)
-+ Code navigation (~dante~)
-+ [[https://github.com/hlissner/emacs-snippets/tree/master/haskell-mode][Snippets]]
+** Maintainers
+- [[doom-user:][@iyefrat]]
 
+[[doom-contrib-maintainer:][Become a maintainer?]]
+
+** Module flags
+- +lsp ::
+  Enable LSP support for ~haskell-mode~. Requires [[doom-module::tools lsp]] and a langserver
+  (supports [[https://github.com/haskell/haskell-language-server][haskell-language-server]]).
+- +tree-sitter ::
+  Leverages tree-sitter for better syntax highlighting and structural text
+  editing. Requires [[doom-module::tools tree-sitter]].
+  
+** Packages
+- [[doom-package:haskell-mode]]
+- [[doom-package:lsp-haskell]] if [[doom-module:+lsp]]
+
+** Hacks
+/No hacks documented for this module./
+
+* Installation
+[[id:01cffea4-3329-45e2-a892-95a384ab2338][Enable this module in your ~doom!~ block.]]
+
+It is recommended to install the haskell tooling using [[https://www.haskell.org/ghcup/][ghcup]]. Only ghc is needed
+for basic functionality:
+
+#+begin_src sh
+ghcup install ghc
+#+end_src
+
+but =+lsp= users should also install the language server:
+
+#+begin_src sh
+ghcup install hls
+#+end_src
+
+Installing [[https://www.haskell.org/cabal/][cabal]] or [[https://docs.haskellstack.org/en/stable/README/][stack]] as well is recommended, and can be done through
+=ghcup=.
+
+=haskell-mode= provides support for [[https://github.com/ndmitchell/hoogle][hoogle]], which can be installed through
+system package manager, cabal, or stack.
+
+=haskell-language-server= provides support for [[https://github.com/ndmitchell/hlint/][hlint]], and haskell code
+formatters such as [[https://github.com/lspitzner/brittany][brittany]], [[https://github.com/ennocramer/floskell][floskell]], [[https://github.com/tweag/ormolu][ormolu]], [[https://github.com/fourmolu/fourmolu][fourmolu]], and [[https://github.com/haskell/stylish-haskell][stylish-haskell]],
+which can be installed through system package manager, cabal, or stack.
+
+** Formatter
+
+[[doom-module::editor format]] by default uses [[https://github.com/fourmolu/fourmolu#installation][fourmolu]] to format code when not
+relying on hls, follow the linked install instructions.
+
+* TODO Usage
 #+begin_quote
-Haskell contends with C and Ruby as my favorite language. My Haskell code will never save the world, but I'll reach for it for small projects and programming exercises (like projecteuler.com or exercism.io).
-
-I'd love to incorporate it into my machine learning work, but Python and Julia hold that crown. For now.
+ 󱌣 /This module's usage documentation is incomplete./ [[doom-contrib-module:][Complete it?]]
 #+end_quote
 
-* Table of Contents :TOC:
-- [[#install][Install]]
-  - [[#intero][Intero]]
-  - [[#dante][Dante]]
-- [[#troubleshooting][Troubleshooting]]
-- [[#resources][Resources]]
+This module integrates the haskell packages into Doom by providing things such
+as REPL support, project root recognition, etc. It also provide the following
+keybindings:
 
-* Install
-This module has two submodules: *Intero* or *Dante*. To activate one, specify one or the other in your pubilc ~init.el~, e.g.:
+| Keybinding      | Description                                 |
+|-----------------+---------------------------------------------|
+| [[kbd:][<localleader> b]] | Build the current cabal project             |
+| [[kbd:][<localleader> c]] | Visit the =.cabal= file of the current buffer |
+| [[kbd:][<localleader> h]] | Toggle visibility of the form at point      |
+| [[kbd:][<localleader> H]] | hides all top level functions               |
 
-#+BEGIN_SRC emacs-lisp
-(doom! :lang (haskell +intero))
-;; or
-(doom! :lang (haskell +dante))
-#+END_SRC
+* TODO Configuration
+#+begin_quote
+ 󱌣 /This module's configuration documentation is incomplete./ [[doom-contrib-module:][Complete it?]]
+#+end_quote
 
-Your dependencies will change slightly, depending on which you choose:
+After installing your preferred formatter, make sure to set
+=lsp-haskell-formatting-provider= to it.
 
-** Intero
-*** Haskell
-To get started you must install *stack*:
-
-**** MacOS
-#+BEGIN_SRC sh :tangle (if (doom-system-os 'macos) "yes")
-brew install haskell-stack
-stack setup
-#+END_SRC
-
-**** Arch Linux
-#+BEGIN_SRC sh :dir /sudo:: :tangle (if (doom-system-os 'arch) "yes")
-sudo pacman --needed --noconfirm -S stack
-# Replace pacaur with your AUR package manager of choice
-pacaur --needed --noconfirm -S ncurses5-compat-lib
-stack setup
-#+END_SRC
-
-*** External dependencies
-This module requires ~ghc-mod~.
-
-#+BEGIN_SRC sh
-stack install ghc-mod
-#+END_SRC
-
-Also ensure that ~\~/.local/bin~ is in ~PATH~:
-
-#+BEGIN_SRC sh
-# place this in your profile file, like ~/.bash_profile or ~/.zshenv
-export PATH="~/.local/bin:$PATH"
-#+END_SRC
-
-** Dante
-*** Haskell
-To get started with Dante and Haskell, you must install cabal
-
-+ cabal (the haskell package builder)
-+ ghc/ghci (the compiler, syntax checker & repl)
-
-**** MacOS
-#+BEGIN_SRC sh
-brew install cabal-install ghc
-#+END_SRC
-
-**** Arch Linux
-#+BEGIN_SRC sh
-sudo pacman --needed --noconfirm -S cabal-install ghc
-#+END_SRC
-
-*** External dependencies
-Dante requires ~ghc-mod~ and ~hoogle~:
-
-#+BEGIN_SRC sh
-cabal update
-cabal install happy haskell-src-exts   # ghc-mod/hoogle dependencies
-cabal ghc-mod hoogle
-#+END_SRC
-
-And add Cabal's bin path to $PATH:
-
-#+BEGIN_SRC sh
-export PATH="$HOME/.cabal/bin:$PATH"
-#+END_SRC
+Make sure to configure the lsp to use your perfered formatter, e.g.:
+#+begin_src emacs-lisp
+;; ~/.doom.d/config.el
+(after! lsp-haskell
+  (setq lsp-haskell-formatting-provider "brittany"))
+#+end_src
 
 * Troubleshooting
-+ Stack users: a ~dist/setup-config~ in your project may cause [[ https://github.com/DanielG/ghc-mod/wiki#known-issues-related-to-stack][ghc-mod to not
-  work]].
+/There are no known problems with this module./ [[doom-report:][Report one?]]
 
-* Resources
-Here are a few resources I've found indespensible in my Haskell adventures:
+* Frequently asked questions
+/This module has no FAQs yet./ [[doom-suggest-faq:][Ask one?]]
 
-+ [[http://learnyouahaskell.com/][Learn you a haskell for great good]]
-+ [[http://haskellbook.com/][Haskell Programming from first principles]]
-+ [[https://github.com/krispo/awesome-haskell][Awesome Haskell]]: an extensive list of haskell resources
-+ [[https://docs.haskellstack.org/en/stable/README/][The Haskell Tool Stack docs]]
+* TODO Appendix
+#+begin_quote
+ 󱌣 This module has no appendix yet. [[doom-contrib-module:][Write one?]]
+#+end_quote

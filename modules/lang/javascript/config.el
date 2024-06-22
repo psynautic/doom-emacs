@@ -1,209 +1,329 @@
 ;;; lang/javascript/config.el -*- lexical-binding: t; -*-
 
-(def-package! js2-mode
-  :mode "\\.js$"
+(after! projectile
+  (pushnew! projectile-project-root-files "package.json")
+  (pushnew! projectile-globally-ignored-directories "^node_modules$" "^flow-typed$"))
+
+
+;;
+;;; Major modes
+
+(dolist (feature '(rjsx-mode
+                   typescript-mode
+                   web-mode
+                   (nodejs-repl-mode . nodejs-repl)))
+  (let ((pkg  (or (cdr-safe feature) feature))
+        (mode (or (car-safe feature) feature)))
+    (with-eval-after-load pkg
+      (set-docsets! mode "JavaScript"
+        "AngularJS" "Backbone" "BackboneJS" "Bootstrap" "D3JS" "EmberJS" "Express"
+        "ExtJS" "JQuery" "JQuery_Mobile" "JQuery_UI" "KnockoutJS" "Lo-Dash"
+        "MarionetteJS" "MomentJS" "NodeJS" "PrototypeJS" "React" "RequireJS"
+        "SailsJS" "UnderscoreJS" "VueJS" "ZeptoJS")
+      (set-ligatures! mode
+        ;; Functional
+        :def "function"
+        :lambda "() =>"
+        :composition "compose"
+        ;; Types
+        :null "null"
+        :true "true" :false "false"
+        ;; Flow
+        :not "!"
+        :and "&&" :or "||"
+        :for "for"
+        :return "return"
+        ;; Other
+        :yield "import"))))
+
+
+(use-package! rjsx-mode
+  :mode "\\.[mc]?js\\'"
+  :mode "\\.es6\\'"
+  :mode "\\.pac\\'"
   :interpreter "node"
-  :config
-  (setq js2-skip-preprocessor-directives t
-        js2-highlight-external-variables nil
-        js2-mode-show-parse-errors nil)
-
-  (add-hook! 'js2-mode-hook
-    #'(flycheck-mode highlight-indentation-mode rainbow-delimiters-mode))
-
-  (set! :repl 'js2-mode #'+javascript/repl)
-  (set! :electric 'js2-mode :chars '(?\} ?\) ?.))
-  (set! :jump 'js2-mode :xref-backend #'xref-js2-xref-backend)
-
-  ;; Conform switch-case indentation to js2 normal indent
-  (defvaralias 'js-switch-indent-offset 'js2-basic-offset)
-
-  (sp-with-modes '(js2-mode rjsx-mode)
-    (sp-local-pair "/* " " */" :post-handlers '(("| " "SPC"))))
-
-  ;; If it's available globally, use eslint_d
-  (setq flycheck-javascript-eslint-executable (executable-find "eslint_d"))
-
-  (defun +javascript|init-flycheck-eslint ()
-    "Favor local eslint over global installs and configure flycheck for eslint."
-    (when (derived-mode-p 'js-mode)
-      (when-let* ((exec-path (list (doom-project-expand "node_modules/.bin")))
-                  (eslint (executable-find "eslint")))
-        (setq-local flycheck-javascript-eslint-executable eslint))
-      (when (flycheck-find-checker-executable 'javascript-eslint)
-        ;; Flycheck has it's own trailing command and semicolon warning that was
-        ;; conflicting with the eslint settings.
-        (setq-local js2-strict-trailing-comma-warning nil)
-        (setq-local js2-strict-missing-semi-warning nil))))
-  (add-hook 'flycheck-mode-hook #'+javascript|init-flycheck-eslint)
-
-  (map! :map js2-mode-map
-        :localleader
-        "r" #'+javascript/refactor-menu
-        "S" #'+javascript/skewer-this-buffer))
-
-
-;; A find-{definition,references} backend for js2-mode. NOTE The xref API is
-;; unstable and may break with an Emacs update.
-(def-package! xref-js2 :commands xref-js2-xref-backend)
-
-
-(def-package! nodejs-repl :commands nodejs-repl)
-
-
-(def-package! js2-refactor
-  :commands
-  (js2r-extract-function js2r-extract-method js2r-introduce-parameter
-   js2r-localize-parameter js2r-expand-object js2r-contract-object
-   js2r-expand-function js2r-contract-function js2r-expand-array
-   js2r-contract-array js2r-wrap-buffer-in-iife js2r-inject-global-in-iife
-   js2r-add-to-globals-annotation js2r-extract-var js2r-inline-var
-   js2r-rename-var js2r-var-to-this js2r-arguments-to-object js2r-ternary-to-if
-   js2r-split-var-declaration js2r-split-string js2r-unwrap js2r-log-this
-   js2r-debug-this js2r-forward-slurp js2r-forward-barf)
+  :hook (rjsx-mode . rainbow-delimiters-mode)
   :init
-  (def-menu! +javascript/refactor-menu
-    "Refactoring commands for `js2-mode' buffers."
-    '(("Extract into function"           :exec js2r-extract-function          :region t)
-      ("Extract into method"             :exec js2r-extract-method            :region t)
-      ("Introduce parameter to function" :exec js2r-introduce-parameter       :region t)
-      ("Localize parameter"              :exec js2r-localize-parameter        :region nil)
-      ("Expand object"                   :exec js2r-expand-object             :region nil)
-      ("Expand function"                 :exec js2r-expand-function           :region nil)
-      ("Expand array"                    :exec js2r-expand-array              :region nil)
-      ("Contract object"                 :exec js2r-contract-object           :region nil)
-      ("Contract function"               :exec js2r-contract-function         :region nil)
-      ("Contract array"                  :exec js2r-contract-array            :region nil)
-      ("Wrap buffer in IIFE"             :exec js2r-wrap-buffer-in-iife       :region nil)
-      ("Inject global into IIFE"         :exec js2r-inject-global-in-iife     :region t)
-      ("Add to globals annotation"       :exec js2r-add-to-globals-annotation :region nil)
-      ("Extract variable"                :exec js2r-extract-var               :region t)
-      ("Inline variable"                 :exec js2r-inline-var                :region t)
-      ("Rename variable"                 :exec js2r-rename-var                :region nil)
-      ("Replace var with this"           :exec js2r-var-to-this               :region nil)
-      ("Arguments to object"             :exec js2r-arguments-to-object       :region nil)
-      ("Ternary to if"                   :exec js2r-ternary-to-if             :region nil)
-      ("Split var declaration"           :exec js2r-split-var-declaration     :region nil)
-      ("Split string"                    :exec js2r-split-string              :region nil)
-      ("Unwrap"                          :exec js2r-unwrap                    :region t)
-      ("Log this"                        :exec js2r-log-this)
-      ("Debug this"                      :exec js2r-debug-this)
-      ("Reformat buffer (eslint_d)"      :exec eslintd-fix :region nil :when (fboundp 'eslintd-fix)))
-    :prompt "Refactor: "))
-
-
-(def-package! tern
-  :hook (js2-mode . tern-mode)
+  ;; Parse node stack traces in the compilation buffer
+  (after! compilation
+    (add-to-list 'compilation-error-regexp-alist 'node)
+    (add-to-list 'compilation-error-regexp-alist-alist
+                 '(node "^[[:blank:]]*at \\(.*(\\|\\)\\(.+?\\):\\([[:digit:]]+\\):\\([[:digit:]]+\\)"
+                        2 3 4)))
   :config
-  (advice-add #'tern-project-dir :override #'doom-project-root))
+  (set-repl-handler! 'rjsx-mode #'+javascript/open-repl)
+  (set-electric! 'rjsx-mode :chars '(?\} ?\) ?. ?:))
+
+  (setq js-chain-indent t
+        ;; These have become standard in the JS community
+        js2-basic-offset 2
+        ;; Don't mishighlight shebang lines
+        js2-skip-preprocessor-directives t
+        ;; let flycheck handle this
+        js2-mode-show-parse-errors nil
+        js2-mode-show-strict-warnings nil
+        ;; Flycheck provides these features, so disable them: conflicting with
+        ;; the eslint settings.
+        js2-strict-missing-semi-warning nil
+        ;; maximum fontification
+        js2-highlight-level 3
+        js2-idle-timer-delay 0.15)
+
+  (setq-hook! 'rjsx-mode-hook
+    ;; Indent switch-case another step
+    js-switch-indent-offset js2-basic-offset)
+
+  (use-package! xref-js2
+    :when (modulep! :tools lookup)
+    :init
+    (setq xref-js2-search-program 'rg)
+    (set-lookup-handlers! 'rjsx-mode
+      :xref-backend #'xref-js2-xref-backend))
+
+  ;; HACK `rjsx-electric-gt' relies on js2's parser to tell it when the cursor
+  ;;      is in a self-closing tag, so that it can insert a matching ending tag
+  ;;      at point. The parser doesn't run immediately however, so a fast typist
+  ;;      can outrun it, causing tags to stay unclosed, so force it to parse:
+  (defadvice! +javascript-reparse-a (n)
+    ;; if n != 1, rjsx-electric-gt calls rjsx-maybe-reparse itself
+    :before #'rjsx-electric-gt
+    (if (= n 1) (rjsx-maybe-reparse))))
 
 
-(def-package! company-tern
-  :when (featurep! :completion company)
-  :after tern
-  :config
-  (set! :company-backend 'js2-mode '(company-tern)))
-
-
-(def-package! rjsx-mode
-  :commands rjsx-mode
-  :mode "\\.jsx$"
-  :mode "components/.+\\.js$"
+(use-package! typescript-mode
+  :hook (typescript-mode . rainbow-delimiters-mode)
+  :hook (typescript-tsx-mode . rainbow-delimiters-mode)
   :init
-  (defun +javascript-jsx-file-p ()
-    (and buffer-file-name
-         (equal (file-name-extension buffer-file-name) "js")
-         (re-search-forward "\\(^\\s-*import React\\|\\( from \\|require(\\)[\"']react\\)"
-                            magic-mode-regexp-match-limit t)
-         (progn (goto-char (match-beginning 1))
-                (not (sp-point-in-string-or-comment)))))
+  (when (modulep! :lang web)
+    (autoload 'typescript-tsx-mode "typescript-mode" nil t))
 
-  (push (cons #'+javascript-jsx-file-p 'rjsx-mode) magic-mode-alist)
+  ;; REVIEW We associate TSX files with `typescript-tsx-mode' derived from
+  ;;        `web-mode' because `typescript-mode' does not officially support
+  ;;        JSX/TSX. See emacs-typescript/typescript.el#4
+  (add-to-list 'auto-mode-alist
+               (cons "\\.tsx\\'"
+                     (if (modulep! :lang web)
+                         #'typescript-tsx-mode
+                       #'typescript-mode)))
 
+  (when (and (modulep! :checkers syntax)
+             (not (modulep! :checkers syntax +flymake)))
+    (after! flycheck
+      (flycheck-add-mode 'javascript-eslint 'web-mode)
+      (flycheck-add-mode 'javascript-eslint 'typescript-mode)
+      (flycheck-add-mode 'javascript-eslint 'typescript-tsx-mode)
+      (flycheck-add-mode 'typescript-tslint 'typescript-tsx-mode)
+      (unless (modulep! +lsp)
+        (after! tide
+          (flycheck-add-next-checker 'typescript-tide '(warning . javascript-eslint) 'append)
+          (flycheck-add-mode 'typescript-tide 'typescript-tsx-mode)))
+      (add-hook! 'typescript-tsx-mode-hook
+        (defun +javascript-disable-tide-checkers-h ()
+          (pushnew! flycheck-disabled-checkers
+                    'javascript-jshint
+                    'tsx-tide
+                    'jsx-tide)))))
   :config
-  (set! :electric 'rjsx-mode :chars '(?\} ?\) ?. ?>))
+  (when (fboundp 'web-mode)
+    (define-derived-mode typescript-tsx-mode web-mode "TypeScript-TSX")
+    (when (modulep! +lsp)
+      (after! lsp-mode
+        (add-to-list 'lsp--formatting-indent-alist '(typescript-tsx-mode . typescript-indent-level))))
+    (when (modulep! +tree-sitter)
+      (after! evil-textobj-tree-sitter
+        (pushnew! evil-textobj-tree-sitter-major-mode-language-alist '(typescript-tsx-mode . "tsx")))
+      (after! tree-sitter
+        (pushnew! tree-sitter-major-mode-language-alist '(typescript-tsx-mode . tsx)))
+      ;; HACK: the tsx grammer doesn't work with the hightlighting provided by
+      ;;   font-lock-keywords. See emacs-tree-sitter/tree-sitter-langs#23
+      (setq-hook! 'typescript-tsx-mode-hook
+        tree-sitter-hl-use-font-lock-keywords nil)))
 
-  ;; disable electric keys (I use snippets and `emmet-mode' instead)
-  (map! :map rjsx-mode-map
-        "<" nil
-        "C-d" nil)
-  (add-hook! rjsx-mode
-    ;; jshint doesn't really know how to deal with jsx
-    (push 'javascript-jshint flycheck-disabled-checkers)))
+  (set-docsets! '(typescript-mode typescript-tsx-mode)
+    :add "TypeScript" "AngularTS")
+  (set-electric! '(typescript-mode typescript-tsx-mode)
+    :chars '(?\} ?\))
+    :words '("||" "&&"))
+  ;; HACK Fixes comment continuation on newline
+  (autoload 'js2-line-break "js2-mode" nil t)
+  (setq-hook! 'typescript-mode-hook
+    comment-line-break-function #'js2-line-break
+
+    ;; Most projects use either eslint, prettier, .editorconfig, or tsf in order
+    ;; to specify indent level and formatting. In the event that no
+    ;; project-level config is specified (very rarely these days), the community
+    ;; default is 2, not 4. However, respect what is in tsfmt.json if it is
+    ;; present in the project
+    typescript-indent-level
+    (or (and (bound-and-true-p tide-mode)
+             (plist-get (tide-tsfmt-options) :indentSize))
+        typescript-indent-level)
+
+    ;; Fix #5556: expand .x to className="x" instead of class="x", if
+    ;; `emmet-mode' is used.
+    emmet-expand-jsx-className? t))
 
 
-(def-package! coffee-mode
-  :mode "\\.coffee$"
-  :init (setq coffee-indent-like-python-mode t))
+;;
+;;; Tools
+
+(when (modulep! +tree-sitter)
+  (add-hook! '(js2-mode-local-vars-hook
+               typescript-mode-local-vars-hook
+               typescript-tsx-mode-local-vars-hook
+               rjsx-mode-local-vars-hook)
+             :append #'tree-sitter!))
+
+(add-hook! '(typescript-mode-local-vars-hook
+             typescript-tsx-mode-local-vars-hook
+             web-mode-local-vars-hook
+             rjsx-mode-local-vars-hook)
+  (defun +javascript-init-lsp-or-tide-maybe-h ()
+    "Start `lsp' or `tide' in the current buffer.
+
+LSP will be used if the +lsp flag is enabled for :lang javascript AND if the
+current buffer represents a file in a project.
+
+If LSP fails to start (e.g. no available server or project), then we fall back
+to tide."
+    (let ((buffer-file-name (buffer-file-name (buffer-base-buffer))))
+      (when (derived-mode-p 'js-mode 'typescript-mode 'typescript-tsx-mode)
+        (if (null buffer-file-name)
+            ;; necessary because `tide-setup' and `lsp' will error if not a
+            ;; file-visiting buffer
+            (add-hook 'after-save-hook #'+javascript-init-lsp-or-tide-maybe-h
+                      nil 'local)
+          (or (if (modulep! +lsp) (lsp!))
+              ;; fall back to tide
+              (if (executable-find "node")
+                  (and (require 'tide nil t)
+                       (progn (tide-setup) tide-mode))
+                (ignore
+                 (doom-log "Couldn't start tide because 'node' is missing"))))
+          (remove-hook 'after-save-hook #'+javascript-init-lsp-or-tide-maybe-h
+                       'local))))))
 
 
-(def-package! web-beautify
-  :commands web-beautify-js
+(use-package! tide
+  :hook (tide-mode . tide-hl-identifier-mode)
+  :config
+  (set-company-backend! 'tide-mode 'company-tide)
+  ;; navigation
+  (set-lookup-handlers! 'tide-mode :async t
+    :xref-backend #'xref-tide-xref-backend
+    :documentation #'tide-documentation-at-point)
+  (set-popup-rule! "^\\*tide-documentation" :quit t)
+
+  (setq tide-completion-detailed t
+        tide-always-show-documentation t
+        ;; Fix #1792: by default, tide ignores payloads larger than 100kb. This
+        ;; is too small for larger projects that produce long completion lists,
+        ;; so we up it to 512kb.
+        tide-server-max-response-length 524288
+        ;; We'll handle it
+        tide-completion-setup-company-backend nil)
+
+  ;; Resolve to `doom-project-root' if `tide-project-root' fails
+  (advice-add #'tide-project-root :override #'+javascript-tide-project-root-a)
+
+  ;; Cleanup tsserver when no tide buffers are left
+  (add-hook! 'tide-mode-hook
+    (add-hook 'kill-buffer-hook #'+javascript-cleanup-tide-processes-h
+              nil 'local))
+
+  ;; Eldoc is activated too soon and disables itself, thinking there is no eldoc
+  ;; support in the current buffer, so we must re-enable it later once eldoc
+  ;; support exists. It is set *after* tide-mode is enabled, so enabling it on
+  ;; `tide-mode-hook' is too early, so...
+  (advice-add #'tide-setup :after #'eldoc-mode)
+
+  (map! :localleader
+        :map tide-mode-map
+        "R"   #'tide-restart-server
+        "f"   #'tide-format
+        "rrs" #'tide-rename-symbol
+        "roi" #'tide-organize-imports))
+
+
+(use-package! js2-refactor
+  :hook ((js2-mode rjsx-mode) . js2-refactor-mode)
   :init
-  (map! :map* (json-mode js2-mode-map) :n "gQ" #'web-beautify-js))
-
-
-(def-package! eslintd-fix
-  :commands (eslintd-fix-mode eslintd-fix))
-
-
-;;
-;; Skewer-mode
-;;
-
-(def-package! skewer-mode
-  :commands (skewer-mode run-skewer)
-  :config
-  (map! :map skewer-mode-map
+  (map! :after js2-mode
+        :map js2-mode-map
         :localleader
-        :n "sE" #'skewer-eval-last-expression
-        :n "se" #'skewer-eval-defun
-        :n "sf" #'skewer-load-buffer))
-
-(def-package! skewer-css ; in skewer-mode
-  :commands skewer-css-mode
+        (:prefix ("r" . "refactor")
+          (:prefix ("a" . "add/arguments"))
+          (:prefix ("b" . "barf"))
+          (:prefix ("c" . "contract"))
+          (:prefix ("d" . "debug"))
+          (:prefix ("e" . "expand/extract"))
+          (:prefix ("i" . "inject/inline/introduce"))
+          (:prefix ("l" . "localize/log"))
+          (:prefix ("o" . "organize"))
+          (:prefix ("r" . "rename"))
+          (:prefix ("s" . "slurp/split/string"))
+          (:prefix ("t" . "toggle"))
+          (:prefix ("u" . "unwrap"))
+          (:prefix ("v" . "var"))
+          (:prefix ("w" . "wrap"))
+          (:prefix ("3" . "ternary"))))
   :config
-  (map! :map skewer-css-mode-map
-        :localleader
-        :n "se" #'skewer-css-eval-current-declaration
-        :n "sr" #'skewer-css-eval-current-rule
-        :n "sb" #'skewer-css-eval-buffer
-        :n "sc" #'skewer-css-clear-all))
+  (when (modulep! :editor evil +everywhere)
+    (add-hook 'js2-refactor-mode-hook #'evil-normalize-keymaps)
+    (let ((js2-refactor-mode-map (evil-get-auxiliary-keymap js2-refactor-mode-map 'normal t t)))
+      (js2r-add-keybindings-with-prefix (format "%s r" doom-localleader-key)))))
 
-(def-package! skewer-html ; in skewer-mode
-  :commands skewer-html-mode
+
+;;;###package skewer-mode
+(map! :localleader
+      (:after js2-mode
+        :map js2-mode-map
+        "S" #'+javascript/skewer-this-buffer
+        :prefix ("s" . "skewer"))
+      :prefix "s"
+      (:after skewer-mode
+        :map skewer-mode-map
+        "E" #'skewer-eval-last-expression
+        "e" #'skewer-eval-defun
+        "f" #'skewer-load-buffer)
+
+      (:after skewer-css
+        :map skewer-css-mode-map
+        "e" #'skewer-css-eval-current-declaration
+        "r" #'skewer-css-eval-current-rule
+        "b" #'skewer-css-eval-buffer
+        "c" #'skewer-css-clear-all)
+
+      (:after skewer-html
+        :map skewer-html-mode-map
+        "e" #'skewer-html-eval-tag))
+
+
+(use-package! npm-mode
+  :hook ((js-mode typescript-mode) . npm-mode)
   :config
-  (map! :map skewer-html-mode-map
-        :localleader
-        :n "se" #'skewer-html-eval-tag))
+  (map! :localleader
+        (:map npm-mode-keymap
+          "n" npm-mode-command-keymap)
+        (:after js2-mode
+          :map js2-mode-map
+          :prefix ("n" . "npm"))))
 
 
 ;;
-;; Projects
-;;
-
-(def-project-mode! +javascript-screeps-mode
-  :match "/screeps\\(-ai\\)?/.+$"
-  :modes (+javascript-npm-mode)
-  :add-hooks (+javascript|init-screeps-mode)
-  :on-load (load! +screeps))
-
-(def-project-mode! +javascript-gulp-mode
-  :files "gulpfile.js")
+;;; Projects
 
 (def-project-mode! +javascript-npm-mode
-  :modes (html-mode css-mode web-mode js2-mode markdown-mode)
-  :files "package.json"
-  :on-enter
-  (when (make-local-variable 'exec-path)
-    (push (doom-project-expand "node_modules/.bin")
-          exec-path)))
+  :modes '(html-mode
+           css-mode
+           web-mode
+           markdown-mode
+           js-mode  ; includes js2-mode and rjsx-mode
+           json-mode
+           typescript-mode
+           solidity-mode)
+  :when (locate-dominating-file default-directory "package.json")
+  :add-hooks '(+javascript-add-npm-path-h npm-mode))
 
-
-;;
-;; Tools
-;;
-
-(def-project-mode! +javascript-eslintd-fix-mode
-  :add-hooks (eslintd-fix-mode))
-
+(def-project-mode! +javascript-gulp-mode
+  :when (locate-dominating-file default-directory "gulpfile.js"))

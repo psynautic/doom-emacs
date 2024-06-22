@@ -1,124 +1,206 @@
 ;;; completion/helm/config.el -*- lexical-binding: t; -*-
 
-;; Warning: since I don't use helm, this may be out of date.
+;; Posframe (requires +childframe)
+(defvar +helm-posframe-handler #'posframe-poshandler-frame-center
+  "The function that determines the location of the childframe.
+It should return a cons cell representing the X and Y coordinates. See
+`posframe-poshandler-frame-center' as a reference.")
 
-(defvar +helm-global-prompt "››› "
-  "The helm text prompt prefix string is globally replaced with this string.")
+(defvar +helm-posframe-text-scale 1
+  "The text-scale to use in the helm childframe. Set to nil for no scaling.
+Can be negative.")
 
+(defvar +helm-posframe-parameters
+  '((internal-border-width . 8)
+    (width . 0.65)
+    (height . 0.35)
+    (min-width . 80)
+    (min-height . 16))
+  "Default parameters for the helm childframe.")
 
 ;;
-;; Packages
-;;
+;;; Packages
 
-(def-package! helm
-  :init
-  (setq helm-quick-update t
-        ;; Speedier without fuzzy matching
-        helm-mode-fuzzy-match nil
-        helm-buffers-fuzzy-matching nil
-        helm-apropos-fuzzy-match nil
-        helm-M-x-fuzzy-match nil
-        helm-recentf-fuzzy-match nil
-        helm-projectile-fuzzy-match nil
-        ;; Display extraineous helm UI elements
+(use-package! helm-mode
+  :hook (doom-first-input . helm-mode)
+  :config
+  ;; helm is too heavy for `find-file-at-point'
+  (add-to-list 'helm-completing-read-handlers-alist (cons #'find-file-at-point nil)))
+
+
+(use-package! helm
+  :after helm-mode
+  :preface
+  (setq helm-candidate-number-limit 150
+        ;; Remove extraineous helm UI elements
         helm-display-header-line nil
         helm-ff-auto-update-initial-value nil
         helm-find-files-doc-header nil
-        ;; Don't override evil-ex's completion
-        helm-mode-handle-completion-in-region nil
-        helm-candidate-number-limit 50
-        ;; Don't wrap item cycling
-        helm-move-to-line-cycle-in-source t)
+        ;; Default helm window sizes
+        helm-display-buffer-default-width nil
+        helm-display-buffer-default-height 0.25
+        ;; When calling `helm-semantic-or-imenu', don't immediately jump to
+        ;; symbol at point.
+        helm-imenu-execute-action-at-once-if-one nil
+        ;; Disable special behavior for left/right, M-left/right keys.
+        helm-ff-lynx-style-map nil
+        ;; Don't commandeer the entire frame for helm commands.
+        helm-always-two-windows nil)
 
-  :config
-  (load "helm-autoloads" nil t)
-  (add-hook 'doom-init-hook #'helm-mode)
-
-  (defvar helm-projectile-find-file-map (make-sparse-keymap))
-  (require 'helm-projectile)
-  (set-keymap-parent helm-projectile-find-file-map helm-map)
-
-  ;; helm is too heavy for find-file-at-point
-  (after! helm-mode
-    (add-to-list 'helm-completing-read-handlers-alist '(find-file-at-point . nil)))
-
-  (set! :popup "\\` ?\\*[hH]elm.*?\\*\\'" :size 14 :regexp t)
-  (setq projectile-completion-system 'helm)
-
-  ;;; Helm hacks
-  (defun +helm*replace-prompt (plist)
-    "Globally replace helm prompts with `+helm-global-prompt'."
-    (if (keywordp (car plist))
-        (plist-put plist :prompt +helm-global-prompt)
-      (setf (nth 2 plist) +helm-global-prompt)
-      plist))
-  (advice-add #'helm :filter-args #'+helm*replace-prompt)
-
-  (defun +helm*hide-header (&rest _)
-    "Hide header-line & mode-line in helm windows."
-    (setq mode-line-format nil))
-  (advice-add #'helm-display-mode-line :override #'+helm*hide-header)
-
-  (map! :map global-map
-        [remap apropos]                   #'helm-apropos
-        [remap find-file]                 #'helm-find-files
-        [remap recentf-open-files]        #'helm-recentf
-        [remap projectile-switch-to-buffer] #'helm-projectile-switch-to-buffer
-        [remap projectile-recentf]        #'helm-projectile-recentf
-        [remap projectile-find-file]      #'helm-projectile-find-file
-        [remap imenu]                     #'helm-semantic-or-imenu
+  (map! [remap apropos]                   #'helm-apropos
+        [remap find-library]              #'helm-locate-library
         [remap bookmark-jump]             #'helm-bookmarks
+        [remap execute-extended-command]  #'helm-M-x
+        [remap find-file]                 #'helm-find-files
+        [remap ibuffer-find-file]         #'helm-find-files
+        [remap locate]                    #'helm-locate
+        [remap imenu]                     #'helm-semantic-or-imenu
         [remap noop-show-kill-ring]       #'helm-show-kill-ring
+        [remap persp-switch-to-buffer]    #'+helm/workspace-mini
+        [remap switch-to-buffer]          #'helm-buffers-list
+        [remap projectile-find-file]      #'+helm/projectile-find-file
+        [remap projectile-recentf]        #'helm-projectile-recentf
         [remap projectile-switch-project] #'helm-projectile-switch-project
-        [remap projectile-find-file]      #'helm-projectile-find-file
-        [remap imenu-anywhere]            #'helm-imenu-anywhere
-        [remap execute-extended-command]  #'helm-M-x))
+        [remap projectile-switch-to-buffer] #'helm-projectile-switch-to-buffer
+        [remap recentf-open-files]        #'helm-recentf
+        [remap yank-pop]                  #'helm-show-kill-ring)
 
+  (when (modulep! :editor evil +everywhere)
+    (setq helm-default-prompt-display-function #'+helm--set-prompt-display))
 
-(def-package! helm-locate
-  :defer t
-  :init (defvar helm-generic-files-map (make-sparse-keymap))
-  :config (set-keymap-parent helm-generic-files-map helm-map))
+  :init
+  (let ((fuzzy (modulep! +fuzzy)))
+    (setq helm-apropos-fuzzy-match fuzzy
+          helm-bookmark-show-location fuzzy
+          helm-buffers-fuzzy-matching fuzzy
+          helm-ff-fuzzy-matching fuzzy
+          helm-file-cache-fuzzy-match fuzzy
+          helm-flx-for-helm-locate fuzzy
+          helm-imenu-fuzzy-match fuzzy
+          helm-lisp-fuzzy-completion fuzzy
+          helm-locate-fuzzy-match fuzzy
+          helm-projectile-fuzzy-match fuzzy
+          helm-recentf-fuzzy-match fuzzy
+          helm-semantic-fuzzy-match fuzzy)
 
+    ;; Make sure that we have helm-multi-matching or fuzzy matching, (as
+    ;; prescribed by the fuzzy flag) also in the following cases:
+    ;;
+    ;; - helmized commands that use `completion-at-point' and similar functions
+    ;; - native commands that fall back to `completion-styles' like `helm-M-x'
+    ;;
+    ;; However, do not add helm completion styles to the front of
+    ;; `completion-styles', since that would be overly intrusive. E.g., it
+    ;; results in `company-capf' returning far to many completion candidates.
+    ;; Instead, append those styles so that they act as a fallback.  Variable
+    ;; completion-styles is ignored unless helm-completion-style is customized
+    ;; to 'emacs.
+    (setq helm-completion-style 'emacs)
+    (add-to-list 'completion-styles (if fuzzy 'flex 'helm) t))
 
-(def-package! helm-bookmark
-  :commands helm-bookmark
-  :config (setq-default helm-bookmark-show-location t))
-
-
-(def-package! helm-files
-  :defer t
   :config
+  (set-popup-rule! "^\\*helm" :vslot -100 :size 0.22 :ttl nil)
+
+  ;; Hide minibuffer if `helm-echo-input-in-header-line'
+  (add-hook 'helm-minibuffer-set-up-hook #'helm-hide-minibuffer-maybe)
+
+  ;; Use helpful instead of describe-* to display documentation
+  (dolist (fn '(helm-describe-variable helm-describe-function))
+    (advice-add fn :around #'doom-use-helpful-a)))
+
+
+(use-package! helm-posframe
+  :when (modulep! +childframe)
+  :hook (helm-mode . helm-posframe-enable)
+  :config
+  (setq helm-posframe-poshandler #'posframe-poshandler-frame-center
+        helm-posframe-width 0.65
+        helm-posframe-height 0.35
+        helm-posframe-min-width 80
+        helm-posframe-min-height 16
+        helm-posframe-border-width 8))
+
+
+(use-package! helm-flx
+  :when (modulep! +fuzzy)
+  :hook (helm-mode . helm-flx-mode))
+
+
+(after! helm-rg
+  (setq helm-rg-display-buffer-normal-method #'pop-to-buffer)
+  (set-popup-rule! "^helm-rg-" :ttl nil :select t :size 0.45)
+  (map! :map helm-rg-map
+        "C-c C-e" #'helm-rg--bounce)
+  (map! :map helm-rg--bounce-mode-map
+        "q" #'kill-current-buffer
+        "C-c C-c" (cmd! (helm-rg--bounce-dump) (kill-current-buffer))
+        "C-x C-c" #'helm-rg--bounce-dump-current-file
+        "C-c C-k" #'kill-current-buffer))
+
+
+;;;###package helm-bookmark
+(setq helm-bookmark-show-location t)
+
+
+(after! helm-files
   (setq helm-boring-file-regexp-list
         (append (list "\\.projects$" "\\.DS_Store$")
                 helm-boring-file-regexp-list)))
 
 
-(def-package! helm-ag
+(defvar helm-generic-files-map (make-sparse-keymap))
+(after! helm-locate
+  (when (and (featurep :system 'macos)
+             (null helm-locate-command)
+             (executable-find "mdfind"))
+    (setq helm-locate-command "mdfind -name %s"))
+  (set-keymap-parent helm-generic-files-map helm-map))
+
+
+(use-package! helm-org
+  :when (modulep! :lang org)
+  :defer t
+  :init
+  (after! helm-mode
+    (pushnew! helm-completing-read-handlers-alist
+              '(org-capture . helm-org-completing-read-tags)
+              '(org-set-tags . helm-org-completing-read-tags))))
+
+
+;; DEPRECATED: Remove when projectile is replaced with project.el
+(use-package! helm-projectile
+  :commands (helm-projectile-find-file
+             helm-projectile-recentf
+             helm-projectile-switch-project
+             helm-projectile-switch-to-buffer)
+  :init
+  (defvar helm-projectile-find-file-map (make-sparse-keymap))
+  :config
+  (set-keymap-parent helm-projectile-find-file-map helm-map))
+
+
+(use-package! swiper-helm
   :defer t
   :config
-  (map! :map helm-ag-edit-map
-        [remap doom/kill-this-buffer] #'helm-ag--edit-abort
-        [remap quit-window]           #'helm-ag--edit-abort))
+  (setq ivy-height 20
+        swiper-helm-display-function
+        (lambda (buf &optional _resume) (pop-to-buffer buf)))
+  (global-set-key [remap swiper] #'swiper-helm)
+  (add-to-list 'swiper-font-lock-exclude #'+doom-dashboard-mode nil #'eq))
 
 
-(def-package! helm-css-scss ; https://github.com/ShingoFukuyama/helm-css-scss
-  :commands (helm-css-scss
-             helm-css-scss-multi
-             helm-css-scss-insert-close-comment)
+(use-package! helm-descbinds
+  :hook (helm-mode . helm-descbinds-mode)
   :config
-  (setq helm-css-scss-split-direction #'split-window-vertically
-        helm-css-scss-split-with-multiple-windows t))
+  ;; HACK: Upstream claims that the two packages are incompatible, but changing
+  ;;   `prefix-help-command' seems to smooth the incompatibility over. More
+  ;;   testing is needed...
+  (setq helm-descbinds-disable-which-key nil
+        prefix-help-command #'helm-descbinds))
 
 
-(def-package! helm-swoop ; https://github.com/ShingoFukuyama/helm-swoop
-  :commands (helm-swoop helm-multi-swoop helm-multi-swoop-all)
-  :config
-  (setq helm-swoop-use-line-number-face t
-        helm-swoop-candidate-number-limit 200
-        helm-swoop-speed-or-color t
-        helm-swoop-pre-input-function (lambda () "")))
-
-
-(def-package! helm-describe-modes :commands helm-describe-modes)
-
+(use-package! helm-icons
+  :when (modulep! +icons)
+  :hook (helm-mode . helm-icons-enable)
+  :init
+  (setq helm-icons-provider 'nerd-icons))

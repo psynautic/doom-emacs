@@ -1,51 +1,27 @@
 ;;; lang/data/config.el -*- lexical-binding: t; -*-
 
-(push '("/sxhkdrc" . conf-mode) auto-mode-alist)
-
-
-(def-package! nxml-mode
-  :mode "\\.plist$"
+(use-package! nxml-mode
+  :mode "\\.p\\(?:list\\|om\\)\\'" ; plist, pom
+  :mode "\\.xs\\(?:d\\|lt\\)\\'"   ; xslt, xsd
+  :mode "\\.rss\\'"
   :config
-  (set! :company-backend 'nxml-mode '(company-nxml company-yasnippet)))
+  (setq nxml-slash-auto-complete-flag t
+        nxml-auto-insert-xml-declaration-flag t)
+  ;; https://github.com/Fuco1/smartparens/issues/397#issuecomment-501059014
+  (after! smartparens
+    (sp-local-pair 'nxml-mode "<" ">" :post-handlers '(("[d1]" "/"))))
+  (set-company-backend! 'nxml-mode '(company-nxml company-yasnippet))
+  (setq-hook! 'nxml-mode-hook tab-width nxml-child-indent)
+  (set-formatter! 'xmllint '("xmllint" "--format" "-") :modes '(nxml-mode)))
 
 
-(def-package! toml-mode :mode "\\.toml$")
-
-
-(def-package! yaml-mode :mode "\\.ya?ml$")
-
-
-(def-package! json-mode
-  :mode "\\.js\\(on\\|[hl]int\\(rc\\)?\\)$"
-  :config
-  (set! :electric 'json-mode :chars '(?\n ?: ?{ ?})))
-
-
-(def-package! vimrc-mode
-  :mode "/\\.?g?vimrc$"
-  :mode "\\.vim$"
-  :mode "\\.?vimperatorrc$"
-  :mode "\\.vimp$")
-
-
-(def-package! dockerfile-mode
-  :mode "/Dockerfile$")
-
-
-;; For ROM hacking or debugging
-(def-package! hexl
-  :mode ("\\.hex$" . hexl-mode)
-  :mode ("\\.nes$" . hexl-mode))
-
-
-;;
-;; Frameworks
-;;
-
-(def-project-mode! +data-ansible-mode
-  :modes (yaml-mode)
-  :files "roles/")
-
-(def-project-mode! +data-vagrant-mode
-  :files "Vagrantfile")
-
+;;;###package csv-mode
+(map! :after csv-mode
+      :localleader
+      :map csv-mode-map
+      "a" #'csv-align-fields
+      "u" #'csv-unalign-fields
+      "s" #'csv-sort-fields
+      "S" #'csv-sort-numeric-fields
+      "k" #'csv-kill-fields
+      "t" #'csv-transpose)

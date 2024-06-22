@@ -1,64 +1,62 @@
 ;;; completion/ido/config.el -*- lexical-binding: t; -*-
 
-(def-package! ido
+(defvar ido-mode-hook nil
+  "List of hooks to run when `ido-mode' is activated.")
+
+
+;;
+;;; Packages
+
+(use-package! ido
+  :hook (doom-first-input . ido-mode)
+  :hook (ido-mode . ido-ubiquitous-mode)
+  :preface
+  ;; HACK `ido' is a really old package. It defines `ido-mode' manually and
+  ;;      doesn't define a hook, so we define one for it, so we can use it!
+  (defadvice! +ido-run-hooks-a (&rest _)
+    :after #'ido-mode
+    (run-hooks 'ido-mode-hook))
+  :init
+  (setq ido-save-directory-list-file (concat doom-cache-dir "ido.last"))
   :config
+  (pushnew! ido-ignore-files "\\`.DS_Store$" "Icon\\?$")
   (setq ido-ignore-buffers
-        '("\\` " "^\\*ESS\\*" "^\\*Messages\\*" "^\\*Help\\*" "^\\*Buffer"
-          "^\\*.*Completions\\*$" "^\\*Ediff" "^\\*tramp" "^\\*cvs-"
-          "_region_" " output\\*$" "^TAGS$" "^\*Ido")
-        ido-use-faces nil
+        '("\\` " "^\\*ESS\\*" "^\\*Messages\\*" "^\\*[Hh]elp" "^\\*Buffer"
+          "^\\*.*Completions\\*$" "^\\*Ediff" "^\\*tramp" "^\\*cvs-" "_region_"
+          " output\\*$" "^TAGS$" "^\*Ido")
+        ido-auto-merge-work-directories-length -1
         ido-confirm-unique-completion t
         ido-case-fold t
-        ido-enable-tramp-completion nil
-        ido-enable-flex-matching t
         ido-create-new-buffer 'always
-        ido-enable-tramp-completion t
-        ido-enable-last-directory-history t
-        ido-save-directory-list-file (concat doom-cache-dir "ido.last"))
+        ido-enable-flex-matching t
+        ido-everywhere t)
 
-  (push "\\`.DS_Store$" ido-ignore-files)
-  (push "Icon\\?$" ido-ignore-files)
+  (map! :map (ido-common-completion-map ido-file-completion-map)
+        "C-w"  #'ido-delete-backward-word-updir
+        :map (ido-common-completion-map ido-file-dir-completion-map)
+        "C-n"  #'ido-next-match
+        "C-p"  #'ido-prev-match
+        [down] #'ido-next-match
+        [up]   #'ido-prev-match
+        :map ido-file-completion-map
+        ;; Go to $HOME with ~
+        "~"    (cmd! (if (looking-back "/" (point-min))
+                         (insert "~/")
+                       (call-interactively #'self-insert-command)))))
 
-  (ido-mode 1)
-  (ido-everywhere 1)
-  (require 'ido-ubiquitous)
-  (ido-ubiquitous-mode 1)
 
-  (defun +ido|init ()
-    (require 'ido-vertical-mode)
-    (ido-vertical-mode 1)
+(use-package! ido-vertical-mode
+  :hook (ido-mode . ido-vertical-mode)
+  :config (setq ido-vertical-show-count t))
 
-    (require 'flx-ido)
-    (flx-ido-mode +1)
 
-    (require 'crm-custom)
-    (crm-custom-mode +1)
+(use-package! ido-sort-mtime
+  :hook (ido-mode . ido-sort-mtime-mode))
 
-    (map! :map (ido-common-completion-map ido-completion-map ido-file-completion-map)
-          "C-n" #'ido-next-match
-          "C-p" #'ido-prev-match
-          "C-w" #'ido-delete-backward-word-updir))
-  (add-hook 'ido-setup-hook #'+ido|init)
 
-  (defun +ido*sort-mtime ()
-    "Sort ido filelist by mtime instead of alphabetically."
-    (setq ido-temp-list
-          (sort ido-temp-list
-                (lambda (a b)
-                  (time-less-p
-                   (sixth (file-attributes (concat ido-current-directory b)))
-                   (sixth (file-attributes (concat ido-current-directory a)))))))
-    (ido-to-end  ;; move . files to end (again)
-     (cl-loop for x in ido-temp-list
-              if (char-equal (string-to-char x) ?.)
-              collect x)))
-  (advice-add #'ido-sort-mtime :override #'+ido*sort-mtime)
-  (add-hook! (ido-make-file-list ido-make-dir-list) #'+ido*sort-mtime)
+(use-package! crm-custom
+  :hook (ido-mode . crm-custom-mode))
 
-  (defun +ido|setup-home-keybind ()
-    "Go to $HOME with ~"
-    (define-key ido-file-completion-map (kbd "~")
-      (λ! (if (looking-back "/" (point-min))
-             (insert "~/")
-           (call-interactively #'self-insert-command)))))
-  (add-hook 'ido-setup-hook #'+ido|setup-home-keybind))
+
+(use-package! flx-ido
+  :hook (ido-mode . flx-ido-mode))

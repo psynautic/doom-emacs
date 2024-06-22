@@ -1,47 +1,36 @@
 ;;; app/rss/autoload.el -*- lexical-binding: t; -*-
 
+(defvar +rss--wconf nil)
+
 ;;;###autoload
 (defun =rss ()
   "Activate (or switch to) `elfeed' in its workspace."
   (interactive)
-  (call-interactively 'elfeed))
-
-;;;###autoload
-(defun +rss/quit ()
-  (interactive)
-  (doom-kill-matching-buffers "^\\*elfeed")
-  (dolist (file +rss-elfeed-files)
-    (when-let* ((buf (get-file-buffer (expand-file-name file +rss-org-dir))))
-      (kill-buffer buf))))
-
-;;;###autoload
-(defun +rss|elfeed-wrap ()
-  "Enhances an elfeed entry's readability by wrapping it to a width of
-`fill-column' and centering it with `visual-fill-column-mode'."
-  (let ((inhibit-read-only t)
-        (inhibit-modification-hooks t))
-    (setq-local truncate-lines nil)
-    (setq-local shr-width 85)
-    (set-buffer-modified-p nil)))
+  (if (modulep! :ui workspaces)
+      (progn
+        (+workspace-switch +rss-workspace-name t)
+        (unless (memq (buffer-local-value 'major-mode
+                                          (window-buffer
+                                           (selected-window)))
+                      '(elfeed-show-mode
+                        elfeed-search-mode))
+          (doom/switch-to-scratch-buffer)
+          (elfeed))
+        (+workspace/display))
+    (setq +rss--wconf (current-window-configuration))
+    (delete-other-windows)
+    (switch-to-buffer (doom-fallback-buffer))
+    (elfeed)))
 
 ;;;###autoload
 (defun +rss/delete-pane ()
   "Delete the *elfeed-entry* split pane."
   (interactive)
-  (let* ((buff (get-buffer "*elfeed-entry*"))
-         (window (get-buffer-window buff)))
-    (kill-buffer buff)
-    (delete-window window)))
-
-;;;###autoload
-(defun +rss-popup-pane (buf)
-  "Display BUF in a popup."
-  (doom-popup-buffer buf
-    '(:align +rss-split-direction
-      :size 0.75
-      :select t
-      :autokill t
-      :autoclose t)))
+  (let* ((buf (get-buffer "*elfeed-entry*"))
+         (window (get-buffer-window buf)))
+    (delete-window window)
+    (when (buffer-live-p buf)
+      (kill-buffer buf))))
 
 ;;;###autoload
 (defun +rss/open (entry)
@@ -71,6 +60,66 @@
     (call-interactively '+rss/open)))
 
 ;;;###autoload
+(defun +rss/copy-link ()
+  "Copy current link to clipboard."
+  (interactive)
+  (let ((link (elfeed-entry-link elfeed-show-entry)))
+    (when link
+      (kill-new link)
+      (message "Copied %s to clipboard" link))))
+;;
+;; Hooks
+
+;;;###autoload
+(defun +rss-elfeed-wrap-h ()
+  "Enhances an elfeed entry's readability by wrapping it to a width of
+`fill-column'."
+  (let ((inhibit-read-only t)
+        (inhibit-modification-hooks t))
+    (setq-local truncate-lines nil)
+    (setq-local shr-use-fonts nil)
+    (setq-local shr-width 85)
+    (set-buffer-modified-p nil)))
+
+(defun +rss--cleanup-on-kill-h ()
+  "Run `elfeed-db-compact'. See `+rss-cleanup-h'."
+  ;; `delete-file-projectile-remove-from-cache' slows down `elfeed-db-compact'
+  ;; tremendously, so we disable the projectile cache:
+  (let (projectile-enable-caching)
+    (elfeed-db-compact)))
+
+;;;###autoload
+(defun +rss-cleanup-h ()
+  "Clean up after an elfeed session. Kills all elfeed and elfeed-org files."
+  (interactive)
+  (add-hook 'kill-emacs-hook #'+rss--cleanup-on-kill-h)
+  (let ((buf (previous-buffer)))
+    (when (or (null buf) (not (doom-real-buffer-p buf)))
+      (switch-to-buffer (doom-fallback-buffer))))
+  (let ((search-buffers (doom-buffers-in-mode 'elfeed-search-mode))
+        (show-buffers (doom-buffers-in-mode 'elfeed-show-mode))
+        kill-buffer-query-functions)
+    (dolist (file (bound-and-true-p rmh-elfeed-org-files))
+      (when-let (buf (get-file-buffer (expand-file-name file org-directory)))
+        (kill-buffer buf)))
+    (dolist (b search-buffers)
+      (with-current-buffer b
+        (remove-hook 'kill-buffer-hook #'+rss-cleanup-h :local)
+        (kill-buffer b)))
+    (mapc #'kill-buffer show-buffers))
+  (if (and (modulep! :ui workspaces)
+           (+workspace-exists-p +rss-workspace-name))
+      (+workspace/delete +rss-workspace-name)
+    (when (window-configuration-p +rss--wconf)
+      (set-window-configuration +rss--wconf))
+    (setq +rss--wconf nil)
+    (previous-buffer)))
+
+
+;;
+;; Functions
+
+;;;###autoload
 (defun +rss-dead-feeds (&optional years)
   "Return a list of feeds that haven't posted anything in YEARS."
   (let* ((years (or years 1.0))
@@ -84,3 +133,20 @@
     (cl-loop for url in (elfeed-feed-list)
              unless (gethash url living-feeds)
              collect url)))
+
+;;;###autoload
+(defun +rss-put-sliced-image-fn (spec alt &optional flags)
+  "TODO"
+  (letf! (defun insert-image (image &optional alt _area _slice)
+           (let ((height (cdr (image-size image t))))
+             (insert-sliced-image image alt nil (max 1 (/ height 20.0)) 1)))
+    (shr-put-image spec alt flags)))
+
+;;;###autoload
+(defun +rss-render-image-tag-without-underline-fn (dom &optional url)
+  "TODO"
+  (let ((start (point)))
+    (shr-tag-img dom url)
+    ;; And remove underlines in case images are links, otherwise we get an
+    ;; underline beneath every slice.
+    (put-text-property start (point) 'face '(:underline nil))))

@@ -27,10 +27,27 @@
 
 (defvar sh-shell-file)
 ;;;###autoload
-(defun +sh/repl ()
+(defun +sh/open-repl ()
   "Open a shell REPL."
+  (interactive)
+  (require 'sh-script)
   (let* ((dest-sh (symbol-name sh-shell))
          (sh-shell-file dest-sh))
     (sh-shell-process t)
     (with-current-buffer "*shell*"
-      (rename-buffer (format "*shell [%s]*" dest-sh)))))
+      (rename-buffer (format "*shell [%s]*" dest-sh))
+      (current-buffer))))
+
+;;;###autoload
+(defun +sh-lookup-documentation-handler ()
+  "Look up documentation in `man' or `woman'."
+  (interactive)
+  (require 'man)
+  (let ((input (Man-default-man-entry)))
+    (if (executable-find "man")
+        (let* ((input (Man-translate-references input))
+               (buffer (Man-getpage-in-background input)))
+          (when (buffer-live-p buffer)
+            (switch-to-buffer buffer)))
+      (woman input t)
+      (current-buffer))))
